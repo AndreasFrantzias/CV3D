@@ -13,8 +13,8 @@ export default function App() {
     const scene = new THREE.Scene()
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
-    camera.position.set(0, 1.5, 5)
-    camera.lookAt(0, 0, 0)
+    camera.position.set(3, 6, 6)
+    //camera.lookAt(0, 0, 0)
 
     const renderer = new THREE.WebGLRenderer()
     renderer.setPixelRatio(window.devicePixelRatio)
@@ -31,9 +31,46 @@ export default function App() {
     let model
     let disposed = false
 
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+    let hoveredObject = null;
+
+    const selectableObjects = [];
+
+    function onMouseMove(event) {
+      //get canvas position when it's not full screen
+      const rect = renderer.domElement.getBoundingClientRect();
+      // Calculate mouse position in normalized device coordinates (-1 to +1) for both components
+      mouse.x = ((event.clientX -rect.left)/rect.width) * 2 - 1;
+      mouse.y = -((event.clientY - rect.top)/ rect.height) * 2 + 1;
+    }
+    window.addEventListener('mousemove',onMouseMove);
+
+    function updateHover(){
+      //point raycaster from camera through mouse's position
+      raycaster.setFromCamera(mouse,camera);
+      //check which object in selectableObjects the ray passed through(true also check the children)
+      const intersects = raycaster.intersectObjects(selectableObjects, true);
+      const newHover = intersects.length > 0 ? intersects[0].object : null;
+      //checks if the new hovered object is different from the previous one
+      if(newHover !== hoveredObject){
+        if(hoveredObject){
+          //reset previous hovered object
+          hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
+        }
+        if(newHover){
+          //store current color and set new color
+          newHover.currentHex = newHover.material.emissive.getHex();
+          newHover.material.emissive.setHex(0xff0000);
+        }
+        //update to the new hovered object
+        hoveredObject = newHover;
+      }
+    }
+
     const loader = new GLTFLoader()
     loader.load(
-      '/CV15.glb',
+      '/CV17.glb',
       (gltf) => {
         if (disposed) return
         model = gltf.scene
@@ -47,15 +84,17 @@ export default function App() {
 
         // model.scale.setScalar(scale)
         // model.position.sub(center.multiplyScalar(scale)) // recenter on the origin (position isn't affected by the object's own scale, so the offset must be pre-scaled)
-
+        //model[0].name = 'LaptopScreen',model[1].name = 'back'
+        // for (let i = 0; i < model.children.length; i++) {
+        //   model.children[i].name = `child_${i}`
+        // }
         scene.add(model)
-        const hideNames = ['Cylinder','Sphere.006','Sphere.007','Sphere.008','Sphere.009','Sphere.010','Plane']
-
         model.traverse((obj) => {
-          if (!obj.isMesh) return
-          const name = (obj.name || '').toLowerCase()
-          if (hideNames.some((hide) => name.includes(hide))) {
-          obj.visible = false
+          if (obj.isMesh) {
+            obj.material = obj.material.clone()
+          }
+          if (obj.name === "LaptopScreen" || obj.name === "back") {
+            selectableObjects.push(obj)
           }
         })
       },
@@ -72,6 +111,7 @@ export default function App() {
     function animate() {
       frameId = requestAnimationFrame(animate)
       controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
+      updateHover();
       renderer.render(scene, camera)
       // per-frame updates + render
     }
