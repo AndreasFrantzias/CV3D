@@ -95,7 +95,7 @@ export default function App() {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
           }
-          if (obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back") {
+          if (obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
             selectableObjects.push(obj)
           }
           // console.log(
