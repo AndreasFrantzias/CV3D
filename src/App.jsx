@@ -51,6 +51,7 @@ export default function App() {
       raycaster.setFromCamera(mouse,camera);
       //check which object in selectableObjects the ray passed through(true also check the children)
       const intersects = raycaster.intersectObjects(selectableObjects, true);
+      console.log('selectable hits:', intersects.map(i => i.object.name || i.object.parent?.name))
       const newHover = intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
@@ -61,7 +62,8 @@ export default function App() {
         if(newHover){
           //store current color and set new color
           newHover.currentHex = newHover.material.emissive.getHex();
-          newHover.material.emissive.setHex(0xff0000);
+          newHover.material.emissive.setHex(0xffee00);
+          // newHover.setScale(100, 100, 100); // Scale up the hovered object
         }
         //update to the new hovered object
         hoveredObject = newHover;
@@ -70,7 +72,7 @@ export default function App() {
 
     const loader = new GLTFLoader()
     loader.load(
-      '/CV17.glb',
+      '/CV18.glb',
       (gltf) => {
         if (disposed) return
         model = gltf.scene
@@ -93,9 +95,15 @@ export default function App() {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
           }
-          if (obj.name === "LaptopScreen" || obj.name === "back") {
+          if (obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back") {
             selectableObjects.push(obj)
           }
+          // console.log(
+          // obj.name,
+          // "isMesh:", obj.isMesh,
+          // "type:", obj.type,
+          // "parent:", obj.parent?.name
+          // )
         })
       },
       undefined,
