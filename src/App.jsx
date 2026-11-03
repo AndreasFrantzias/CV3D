@@ -19,14 +19,13 @@ export default function App() {
     const renderer = new THREE.WebGLRenderer()
     renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(window.innerWidth, window.innerHeight)
+    renderer.toneMapping = THREE.AgXToneMapping // same view transform as Blender
+    renderer.shadowMap.enabled = true
     container.appendChild(renderer.domElement)
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1)
-    scene.add(ambient)
-
-    const directional = new THREE.DirectionalLight(0xffffff, 2)
-    directional.position.set(5, 5, 5)
-    scene.add(directional)
+    // soft sky fill; the sun, desk lamp and screen glows come from the .glb (lights made in Blender)
+    const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x5a4636, 1)
+    scene.add(hemi)
 
     let model
     let disposed = false
@@ -72,7 +71,7 @@ export default function App() {
 
     const loader = new GLTFLoader()
     loader.load(
-      '/CV18.glb',
+      '/CV19.glb',
       (gltf) => {
         if (disposed) return
         model = gltf.scene
@@ -94,6 +93,20 @@ export default function App() {
         model.traverse((obj) => {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
+            obj.castShadow = true
+            obj.receiveShadow = true
+          }
+          // glTF doesn't store shadow settings, so turn them on for the sun and the desk lamp
+          if (obj.isDirectionalLight || obj.isSpotLight) {
+            obj.castShadow = true
+            obj.shadow.mapSize.set(2048, 2048)
+            obj.shadow.bias = -0.0005
+            obj.shadow.normalBias = 0.02
+          }
+          if (obj.isDirectionalLight) {
+            // fit the sun's shadow box around the room
+            Object.assign(obj.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 })
+            obj.shadow.camera.updateProjectionMatrix()
           }
           if (obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
             selectableObjects.push(obj)
