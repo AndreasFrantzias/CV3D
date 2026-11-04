@@ -1,0 +1,74 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 0.35);
+  animation: fade-in 0.2s ease-out;
+}
+
+.os-window {
+  width: min(520px, 100%);
+  overflow: hidden;
+  border-radius: 10px;
+  background: #f7f7f5;
+  color: #1d1d1f;
+  font-family: system-ui, sans-serif;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 0.5);
+  animation: pop-in 0.25s ease-out;
+}
+
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #e4e4e2;
+  border-bottom: 1px solid #d0d0ce;
+}
+
+.dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+}
+.dot.close { background: #ff5f57; cursor: pointer; }
+.dot.min { background: #febc2e; }
+.dot.max { background: #28c840; }
+
+.title {
+  flex: 1;
+  margin-right: 52px; /* offsets the dots so the title stays centred */
+  text-align: center;
+  font-size: 13px;
+  color: #555;
+}
+
+.content { padding: 24px 28px 28px; }
+.content h1 { margin: 0; font-size: 24px; }
+.subtitle { margin: 4px 0 16px; color: #666; }
+
+.links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.links a {
+  display: inline-block;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: #1d1d1f;
+  color: #fff;
+  font-size: 14px;
+  text-decoration: none;
+}
+.links a:hover { background: #3a3a3c; }
+
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.95); } }

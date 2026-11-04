@@ -1,10 +1,28 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
+import gsap from 'gsap'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import './App.css'
+
+// shown in the window that opens when the monitor is clicked — fill these in
+const INFO = {
+  name: 'Your Name',
+  title: 'Your Title',
+  bio: 'One or two lines about yourself.',
+  links: [
+    { label: 'GitHub', href: 'https://github.com/your-username' },
+    { label: 'LinkedIn', href: 'https://www.linkedin.com/in/your-profile' },
+    { label: 'Email', href: 'mailto:you@example.com' },
+  ],
+}
+
+const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
 
 export default function App() {
   const containerRef = useRef(null)
+  const closeRef = useRef(null)
+  const [windowOpen, setWindowOpen] = useState(false)
 
   useEffect(() => {
     const container = containerRef.current
@@ -51,9 +69,10 @@ export default function App() {
       //check which object in selectableObjects the ray passed through(true also check the children)
       const intersects = raycaster.intersectObjects(selectableObjects, true);
       console.log('selectable hits:', intersects.map(i => i.object.name || i.object.parent?.name))
-      const newHover = intersects.length > 0 ? intersects[0].object : null;
+      const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
+        renderer.domElement.style.cursor = findMonitor(newHover) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -68,6 +87,65 @@ export default function App() {
         hoveredObject = newHover;
       }
     }
+
+    let focused = false
+    let savedView = null
+    const pointerDown = new THREE.Vector2()
+
+    // the monitor may load as a group of meshes, so walk up to the node named 'monitor'
+    function findMonitor(obj) {
+      while (obj && obj.name !== 'monitor') obj = obj.parent
+      return obj
+    }
+
+    function onPointerDown(event) {
+      pointerDown.set(event.clientX, event.clientY)
+    }
+
+    function onClick(event) {
+      // ignore the click that ends an orbit drag
+      if (focused || Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) > 5) return
+      onMouseMove(event)
+      raycaster.setFromCamera(mouse, camera)
+      const hit = raycaster.intersectObjects(selectableObjects, true)[0]
+      const monitor = hit && findMonitor(hit.object)
+      if (monitor) focusMonitor(monitor, hit)
+    }
+
+    function focusMonitor(monitor, hit) {
+      focused = true
+      controls.enabled = false
+      savedView = { position: camera.position.clone(), target: controls.target.clone() }
+
+      // park the camera in front of the clicked face, far enough back to fit the whole monitor
+      const box = new THREE.Box3().setFromObject(monitor)
+      const center = box.getCenter(new THREE.Vector3())
+      const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld)
+      const distance = box.getSize(new THREE.Vector3()).length() / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2))
+      const position = center.clone().addScaledVector(normal, distance)
+
+      gsap.to(camera.position, { ...xyz(position), duration: 1.2, ease: 'power2.inOut', overwrite: true })
+      gsap.to(controls.target, { ...xyz(center), duration: 1.2, ease: 'power2.inOut', overwrite: true, onComplete: () => setWindowOpen(true) })
+    }
+
+    function closeMonitor() {
+      if (!focused) return
+      setWindowOpen(false)
+      gsap.to(camera.position, { ...xyz(savedView.position), duration: 1, ease: 'power2.inOut', overwrite: true })
+      gsap.to(controls.target, { ...xyz(savedView.target), duration: 1, ease: 'power2.inOut', overwrite: true, onComplete: () => {
+        controls.enabled = true
+        focused = false
+      } })
+    }
+    closeRef.current = closeMonitor
+
+    function onKeyDown(event) {
+      if (event.key === 'Escape') closeMonitor()
+    }
+
+    renderer.domElement.addEventListener('pointerdown', onPointerDown)
+    renderer.domElement.addEventListener('click', onClick)
+    window.addEventListener('keydown', onKeyDown)
 
     const loader = new GLTFLoader()
     loader.load(
@@ -108,7 +186,7 @@ export default function App() {
             Object.assign(obj.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 })
             obj.shadow.camera.updateProjectionMatrix()
           }
-          if (obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
+          if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
             selectableObjects.push(obj)
           }
           // console.log(
@@ -152,6 +230,10 @@ export default function App() {
       disposed = true
       cancelAnimationFrame(frameId)
       window.removeEventListener('resize', handleResize)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('keydown', onKeyDown)
+      gsap.killTweensOf([camera.position, controls.target])
+      controls.dispose()
 
       if (model) scene.remove(model)
       container.removeChild(renderer.domElement)
@@ -160,7 +242,33 @@ export default function App() {
   }, [])
 
   return (
-    <div ref={containerRef} style={{ width: '100vw', height: '100vh' }}>
-    </div>
+    <>
+      <div ref={containerRef} style={{ width: '100vw', height: '100vh' }}>
+      </div>
+      {windowOpen && (
+        <div className="backdrop" onClick={() => closeRef.current()}>
+          <div className="os-window" role="dialog" aria-label="About me" onClick={(e) => e.stopPropagation()}>
+            <div className="titlebar">
+              <button className="dot close" aria-label="Close" autoFocus onClick={() => closeRef.current()} />
+              <span className="dot min" />
+              <span className="dot max" />
+              <span className="title">about-me</span>
+            </div>
+            <div className="content">
+              <h1>{INFO.name}</h1>
+              <p className="subtitle">{INFO.title}</p>
+              <p>{INFO.bio}</p>
+              <ul className="links">
+                {INFO.links.map((link) => (
+                  <li key={link.label}>
+                    <a href={link.href} target="_blank" rel="noreferrer">{link.label}</a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
