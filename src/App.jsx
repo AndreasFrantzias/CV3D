@@ -7,12 +7,12 @@ import './App.css'
 
 // shown in the window that opens when the monitor is clicked — fill these in
 const INFO = {
-  name: 'Your Name',
+  name: 'Andreas Frantzias',
   title: 'Your Title',
   bio: 'One or two lines about yourself.',
   links: [
-    { label: 'GitHub', href: 'https://github.com/your-username' },
-    { label: 'LinkedIn', href: 'https://www.linkedin.com/in/your-profile' },
+    { label: 'GitHub', href: 'https://github.com/AndreasFrantzias' },
+    { label: 'LinkedIn', href: 'https://www.linkedin.com/in/andreas-frantzias-bb81b2303/' },
     { label: 'Email', href: 'mailto:you@example.com' },
   ],
 }
@@ -42,7 +42,9 @@ export default function App() {
     container.appendChild(renderer.domElement)
 
     // soft sky fill; the sun, desk lamp and screen glows come from the .glb (lights made in Blender)
-    const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x5a4636, 1)
+    const SKY_FILL = 1
+    const SKY_FILL_DARK = 0.15 // sky fill left when the blind is closed, so the room isn't pitch black
+    const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x5a4636, SKY_FILL)
     scene.add(hemi)
 
     let model
@@ -72,7 +74,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findMonitor(newHover) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -92,10 +94,47 @@ export default function App() {
     let savedView = null
     const pointerDown = new THREE.Vector2()
 
-    // the monitor may load as a group of meshes, so walk up to the node named 'monitor'
-    function findMonitor(obj) {
-      while (obj && obj.name !== 'monitor') obj = obj.parent
+    // screens that zoom in and open the window ('LaptopScreen' is the big main monitor in the .glb)
+    const zoomableScreens = ['monitor', 'LaptopScreen']
+
+    // a model part may load as a group of meshes, so walk up to the node with one of these names
+    function findNamed(obj, names) {
+      while (obj && !names.includes(obj.name)) obj = obj.parent
       return obj
+    }
+
+    const BLIND_CLOSED_BOTTOM = 3.627 // top of the window sill in CV19.glb — lower edge of the closed blind
+    let blindClosed = false
+
+    function toggleBlind(blind) {
+      blindClosed = !blindClosed
+      // the blind is two meshes: the fabric strip and its white pull handle
+      const fabric = blind.children.find((mesh) => mesh.material.name !== 'white')
+      const handle = blind.children.find((mesh) => mesh.material.name === 'white')
+      const { min, max } = new THREE.Box3().setFromBufferAttribute(fabric.geometry.attributes.position)
+
+      // stretch the fabric down to the sill; shifting position.y by top * (1 - scale) keeps its top edge in place
+      const scale = blindClosed ? (max.y - BLIND_CLOSED_BOTTOM) / (max.y - min.y) : 1
+      const tween = { duration: 1, ease: 'power2.inOut', overwrite: true }
+      gsap.to(fabric.scale, { y: scale, ...tween })
+      gsap.to(fabric.position, { y: max.y * (1 - scale), ...tween })
+      // the handle rides along with the fabric's bottom edge
+      gsap.to(handle.position, { y: blindClosed ? BLIND_CLOSED_BOTTOM - min.y : 0, ...tween })
+
+      // a closed blind shuts out the sun and most of the sky light
+      gsap.to(sun, { intensity: blindClosed ? 0 : sunIntensity, ...tween })
+      gsap.to(hemi, { intensity: blindClosed ? SKY_FILL_DARK : SKY_FILL, ...tween })
+    }
+
+    // set when the model loads; the *Intensity values are the brightness given in Blender
+    let sun, sunIntensity, lampSpot, lampSpotIntensity, lampBulb, lampBulbIntensity
+    let lampOn = false
+
+    function toggleLamp() {
+      lampOn = !lampOn
+      const tween = { duration: 0.15, overwrite: true }
+      gsap.to(lampSpot, { intensity: lampOn ? lampSpotIntensity : 0, ...tween })
+      gsap.to(lampBulb, { emissiveIntensity: lampOn ? lampBulbIntensity : 0, ...tween })
     }
 
     function onPointerDown(event) {
@@ -108,8 +147,12 @@ export default function App() {
       onMouseMove(event)
       raycaster.setFromCamera(mouse, camera)
       const hit = raycaster.intersectObjects(selectableObjects, true)[0]
-      const monitor = hit && findMonitor(hit.object)
+      if (!hit) return
+      const monitor = findNamed(hit.object, zoomableScreens)
+      const blind = findNamed(hit.object, ['windowblind'])
       if (monitor) focusMonitor(monitor, hit)
+      else if (blind) toggleBlind(blind)
+      else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
     }
 
     function focusMonitor(monitor, hit) {
@@ -185,6 +228,21 @@ export default function App() {
             // fit the sun's shadow box around the room
             Object.assign(obj.shadow.camera, { left: -7, right: 7, top: 7, bottom: -7, near: 1, far: 30 })
             obj.shadow.camera.updateProjectionMatrix()
+          }
+          if (obj.name === 'Sun') {
+            sun = obj
+            sunIntensity = obj.intensity
+          }
+          // the desk lamp starts switched off — click it to turn it on
+          if (obj.name === 'LampSpot') {
+            lampSpot = obj
+            lampSpotIntensity = obj.intensity
+            obj.intensity = 0
+          }
+          if (obj.material?.name === 'bulb') {
+            lampBulb = obj.material
+            lampBulbIntensity = lampBulb.emissiveIntensity
+            lampBulb.emissiveIntensity = 0
           }
           if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
             selectableObjects.push(obj)
