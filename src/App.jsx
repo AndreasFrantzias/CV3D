@@ -13,7 +13,7 @@ const INFO = {
   links: [
     { label: 'GitHub', href: 'https://github.com/AndreasFrantzias' },
     { label: 'LinkedIn', href: 'https://www.linkedin.com/in/andreas-frantzias-bb81b2303/' },
-    { label: 'Email', href: 'mailto:you@example.com' },
+    { label: 'Instagram', href: 'https://www.instagram.com/frantziasandreas/' },
   ],
 }
 
@@ -74,7 +74,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -150,8 +150,10 @@ export default function App() {
       if (!hit) return
       const monitor = findNamed(hit.object, zoomableScreens)
       const blind = findNamed(hit.object, ['windowblind'])
+      const chair = findNamed(hit.object, ['ChairPivot'])
       if (monitor) focusMonitor(monitor, hit)
       else if (blind) toggleBlind(blind)
+      else if (chair) spinChair(chair)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
     }
 
@@ -180,6 +182,15 @@ export default function App() {
         focused = false
       } })
     }
+
+    // ChairPivot is an Empty from Blender sitting on the gas lift; the seat, back and arms are parented to it
+    let chairAngle = 0
+
+    function spinChair(chair) {
+      // tween to an absolute angle (not '+=') so a click mid-spin still ends facing the desk
+      chairAngle += Math.PI * 2
+      gsap.to(chair.rotation, { y: chairAngle, duration: 1.5, ease: 'power2.out', overwrite: true })
+    }
     closeRef.current = closeMonitor
 
     function onKeyDown(event) {
@@ -192,7 +203,7 @@ export default function App() {
 
     const loader = new GLTFLoader()
     loader.load(
-      '/CV19.glb',
+      '/CV20.glb',
       (gltf) => {
         if (disposed) return
         model = gltf.scene
@@ -244,7 +255,7 @@ export default function App() {
             lampBulbIntensity = lampBulb.emissiveIntensity
             lampBulb.emissiveIntensity = 0
           }
-          if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "back" || obj.name === "headrest" || obj.name === "backrest" || obj.name === "chairset" || obj.name === "chair_holder" || obj.name === "chairseat" || obj.name === "armextendor2" || obj.name === "armextendor1" || obj.name === "armposter1" || obj.name === "armposter2" || obj.name === "armposter1.001" || obj.name === "armposter1.002") {
+          if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "ChairPivot") {
             selectableObjects.push(obj)
           }
           // console.log(
