@@ -8,8 +8,8 @@ import './App.css'
 // shown in the window that opens when the monitor is clicked — fill these in
 const INFO = {
   name: 'Andreas Frantzias',
-  title: 'Your Title',
-  bio: 'One or two lines about yourself.',
+  education: 'BSc in Computer Science, National and Kapodistrian University of Athens',
+  bio: 'Aspiring software engineer with a passion for 3D graphics, web development, and quantum computing. Skilled in C++, React/Three.js and blender, I enjoy creating immersive applications that blend technology and creativity.',
   links: [
     { label: 'GitHub', href: 'https://github.com/AndreasFrantzias' },
     { label: 'LinkedIn', href: 'https://www.linkedin.com/in/andreas-frantzias-bb81b2303/' },
