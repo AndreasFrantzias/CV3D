@@ -25,8 +25,8 @@ const BOOKS = [
 
 // shown in the window that opens when the snowboard or helmet is clicked — fill these in
 const SPORTS = [
-  { name: 'Snowboarding', note: 'A line about it' },
-  { name: 'Another sport', note: 'A line about it' },
+  { name: 'Snowboarding', note: 'Started 3 years ago, Visited Bansko in Hungary,Parnassos' },
+  { name: 'Basketball', note: 'I played basketball from middle school and i now play when i have the time' },
 ]
 
 const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
