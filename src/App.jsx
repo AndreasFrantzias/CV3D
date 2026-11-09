@@ -23,6 +23,8 @@ export default function App() {
   const containerRef = useRef(null)
   const closeRef = useRef(null)
   const [windowOpen, setWindowOpen] = useState(false)
+  const [songsOpen, setSongsOpen] = useState(false)
+  const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
 
   useEffect(() => {
     const container = containerRef.current
@@ -74,7 +76,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -151,9 +153,11 @@ export default function App() {
       const monitor = findNamed(hit.object, zoomableScreens)
       const blind = findNamed(hit.object, ['windowblind'])
       const chair = findNamed(hit.object, ['ChairPivot'])
+      const guitar = findNamed(hit.object, ['GuitarPivot'])
       if (monitor) focusMonitor(monitor, hit)
       else if (blind) toggleBlind(blind)
       else if (chair) spinChair(chair)
+      else if (guitar) strumGuitar(guitar)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
     }
 
@@ -193,8 +197,78 @@ export default function App() {
     }
     closeRef.current = closeMonitor
 
+    // knock the guitar sideways and let it wobble back upright on its foot
+    function strumGuitar(pivot) {
+      gsap.fromTo(pivot.rotation, { z: 0.06 }, { z: 0, duration: 1.2, ease: 'elastic.out(1, 0.3)', overwrite: true })
+      playTune()
+      showTopTracks()
+    }
+
+    // the guitar's window lists my most-played Spotify tracks, fetched on the first click from the function in api/top-tracks.js
+    let tracksRequest
+    function showTopTracks() {
+      setSongsOpen(true)
+      if (tracksRequest) return
+      setTracks(null)
+      tracksRequest = fetch('/api/top-tracks')
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+        .then(setTracks)
+        .catch(() => {
+          tracksRequest = null // try again on the next click
+          setTracks(false)
+        })
+    }
+
+    // a short riff synthesized in the browser, no sound file: Em, C, G, D picked one string at a time, then a G strum
+    // notes are MIDI numbers (60 = middle C)
+    const RIFF = [40, 47, 52, 55, 48, 55, 60, 64, 43, 50, 55, 59, 50, 57, 62, 66]
+    const STRUM = [43, 47, 50, 55, 59, 67]
+    const TUNE_LENGTH = 1.7 // seconds, start to silence
+    const RING = 0.35 // seconds the last chord rings before fading out
+    const FADE = 0.15 // seconds of fade-out at the end
+    const NOTE_GAP = (TUNE_LENGTH - RING - FADE) / RIFF.length // the picked notes fill the rest
+    let audio, volume
+    let take // gain node for the current playthrough, so a re-click can silence it
+
+    // Karplus-Strong plucked string: a burst of noise repeated once per wavelength, averaged each pass so it mellows and fades like a string
+    function pluck(note, when, output) {
+      const rate = audio.sampleRate
+      const period = Math.round(rate / (440 * 2 ** ((note - 69) / 12))/2)
+      const buffer = audio.createBuffer(1, rate * 2, rate)
+      const data = buffer.getChannelData(0)
+      for (let i = 0; i < data.length; i++) {
+        data[i] = i < period ? Math.random() * 2 - 1 : 0.498 * (data[i - period] + data[i - period + 1])
+      }
+      const source = audio.createBufferSource()
+      source.buffer = buffer
+      source.connect(output)
+      source.start(when)
+    }
+
+    function playTune() {
+      // browsers only allow audio to start from a click, so the context is made on the first one
+      if (!audio) {
+        audio = new AudioContext()
+        volume = audio.createGain()
+        volume.gain.value = 0.1
+        volume.connect(audio.destination)
+      }
+      audio.resume()
+      const now = audio.currentTime
+      // restart: fade the previous playthrough out in ~50ms (an instant cut would click) and start a fresh one
+      // (cancel its scheduled fade first, or that would turn it back up)
+      take?.gain.cancelScheduledValues(now).setTargetAtTime(0, now, 0.015)
+      take = audio.createGain()
+      take.connect(volume)
+      RIFF.forEach((note, i) => pluck(note, now + i * NOTE_GAP, take))
+      const strumAt = now + RIFF.length * NOTE_GAP
+      STRUM.forEach((note, i) => pluck(note, strumAt + i * 0.025, take))
+      take.gain.setValueAtTime(1, strumAt + RING).linearRampToValueAtTime(0, now + TUNE_LENGTH)
+    }
     function onKeyDown(event) {
-      if (event.key === 'Escape') closeMonitor()
+      if (event.key !== 'Escape') return
+      closeMonitor()
+      setSongsOpen(false)
     }
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -265,6 +339,18 @@ export default function App() {
           // "parent:", obj.parent?.name
           // )
         })
+
+        // the guitar and its strings have their origins at the world origin, so give them a shared pivot at the guitar's foot
+        // (glTF names lose their dots, so the strings load as guitarString, guitarString001, ...)
+        const guitarParts = model.children.filter((obj) => obj.name.startsWith('guitar'))
+        const guitarBox = new THREE.Box3()
+        guitarParts.forEach((obj) => guitarBox.expandByObject(obj))
+        const guitarPivot = new THREE.Group()
+        guitarPivot.name = 'GuitarPivot'
+        guitarBox.getCenter(guitarPivot.position).setY(guitarBox.min.y)
+        model.add(guitarPivot)
+        guitarParts.forEach((obj) => guitarPivot.attach(obj))
+        selectableObjects.push(guitarPivot)
       },
       undefined,
       (error) => console.error('Failed to load model:', error)
@@ -307,6 +393,7 @@ export default function App() {
       if (model) scene.remove(model)
       container.removeChild(renderer.domElement)
       renderer.dispose()
+      audio?.close()
     }
   }, [])
 
@@ -334,6 +421,39 @@ export default function App() {
                   </li>
                 ))}
               </ul>
+            </div>
+          </div>
+        </div>
+      )}
+      {songsOpen && (
+        <div className="backdrop" onClick={() => setSongsOpen(false)}>
+          <div className="os-window" role="dialog" aria-label="My most-played Spotify tracks" onClick={(e) => e.stopPropagation()}>
+            <div className="titlebar">
+              <button className="dot close" aria-label="Close" autoFocus onClick={() => setSongsOpen(false)} />
+              <span className="dot min" />
+              <span className="dot max" />
+              <span className="title">on-repeat</span>
+            </div>
+            <div className="content">
+              <h1>On repeat</h1>
+              <p className="subtitle">My most-played tracks on Spotify, last 6 months</p>
+              {tracks === null && <p>Loading…</p>}
+              {tracks === false && <p>Couldn't reach Spotify right now. Try again in a bit.</p>}
+              {tracks && (
+                <ol className="tracks">
+                  {tracks.map((track) => (
+                    <li key={track.id}>
+                      <a href={track.url} target="_blank" rel="noreferrer">
+                        <img src={track.image} alt="" width="40" height="40" />
+                        <span className="track-text">
+                          <strong>{track.name}</strong>
+                          <span className="artist">{track.artists}</span>
+                        </span>
+                      </a>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         </div>
