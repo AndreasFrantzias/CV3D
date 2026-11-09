@@ -23,9 +23,15 @@ const BOOKS = [
   { title: 'The Brothers Karamazov', author: 'Fyodor Dostoevsky' }
 ]
 
+// shown in the window that opens when the snowboard or helmet is clicked — fill these in
+const SPORTS = [
+  { name: 'Snowboarding', note: 'A line about it' },
+  { name: 'Another sport', note: 'A line about it' },
+]
+
 const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
 
-// the desktop-style window that the monitor, guitar and books open
+// the desktop-style window that the monitor, guitar, books and snow gear open
 function OsWindow({ title, label, onClose, children }) {
   return (
     <div className="backdrop" onClick={onClose}>
@@ -48,6 +54,7 @@ export default function App() {
   const [windowOpen, setWindowOpen] = useState(false)
   const [songsOpen, setSongsOpen] = useState(false)
   const [booksOpen, setBooksOpen] = useState(false)
+  const [sportsOpen, setSportsOpen] = useState(false)
   const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
 
   useEffect(() => {
@@ -100,7 +107,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -179,11 +186,13 @@ export default function App() {
       const chair = findNamed(hit.object, ['ChairPivot'])
       const guitar = findNamed(hit.object, ['GuitarPivot'])
       const shelf = findNamed(hit.object, ['Books'])
+      const snowGear = findNamed(hit.object, ['SnowGear'])
       if (monitor) focusMonitor(monitor, hit)
       else if (blind) toggleBlind(blind)
       else if (chair) spinChair(chair)
       else if (guitar) strumGuitar(guitar)
       else if (shelf) shakeBooks(shelf)
+      else if (snowGear) shakeSnowGear(snowGear, hit.point)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
     }
 
@@ -306,11 +315,61 @@ export default function App() {
       })
     }
 
+    // the snowboard leaning on the left wall, plus the helmet, goggles and straps on the floor beside it
+    const SNOW_GEAR = ['snowboard', 'helmet', 'goggle', 'helmetstrap1', 'helmetstrap2']
+    const FLOOR_Y = 0.31 // top of the floor tiles, where the snow lands
+
+    // shake the gear along the wall (not into it), throw snow from where it was clicked, then open the sports window
+    function shakeSnowGear(gear, point) {
+      // gear is a group made at the world origin on load, so its resting z is 0
+      gsap.fromTo(gear.position, { z: 0.06 }, { z: 0, duration: 0.8, ease: 'elastic.out(1, 0.2)', overwrite: true, onComplete: () => setSportsOpen(true) })
+      throwSnow(point)
+    }
+
+    // a burst of snow flakes: each gets a random launch velocity into the room, arcs under gravity, lands on the floor and fades
+    function throwSnow(origin) {
+      const COUNT = 200
+      const LIFE = 1.5 // seconds until the snow has faded
+      const GRAVITY = 15 // scene units/s², gentler than real so the snow floats a little
+      const flakes = Array.from({ length: COUNT }, () => {
+        const v = new THREE.Vector3(Math.random() * 2, 2 + Math.random() * 2.5, -Math.random() * 2) // +x and -z point into the room
+        const land = (v.y + Math.sqrt(Math.max(0, v.y ** 2 + 2 * GRAVITY * (origin.y - FLOOR_Y)))) / GRAVITY // when it reaches the floor
+        return { v, land }
+      })
+      const positions = new THREE.BufferAttribute(new Float32Array(COUNT * 3), 3)
+      const snow = new THREE.Points(
+        new THREE.BufferGeometry().setAttribute('position', positions),
+        new THREE.PointsMaterial({ color: 0xffffff, size: 0.05, transparent: true, depthWrite: false }),
+      )
+      scene.add(snow)
+
+      const clock = { t: 0 }
+      gsap.to(clock, {
+        t: LIFE,
+        duration: LIFE,
+        ease: 'none',
+        onUpdate: () => {
+          flakes.forEach(({ v, land }, i) => {
+            const t = Math.min(clock.t, land) // a landed flake stays put
+            positions.setXYZ(i, origin.x + v.x * t, origin.y + v.y * t - 0.5 * GRAVITY * t * t, origin.z + v.z * t)
+          })
+          positions.needsUpdate = true
+          snow.material.opacity = 1 - (clock.t / LIFE) ** 2
+        },
+        onComplete: () => {
+          scene.remove(snow)
+          snow.geometry.dispose()
+          snow.material.dispose()
+        },
+      })
+    }
+
     function onKeyDown(event) {
       if (event.key !== 'Escape') return
       closeMonitor()
       setSongsOpen(false)
       setBooksOpen(false)
+      setSportsOpen(false)
     }
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -400,6 +459,13 @@ export default function App() {
         model.add(shelf)
         model.children.filter((obj) => obj.name.startsWith('book')).forEach((book) => shelf.attach(book))
         selectableObjects.push(shelf)
+
+        // same for the snow gear: a 'SnowGear' group, so a click on the board or the helmet shakes them all together
+        const snowGear = new THREE.Group()
+        snowGear.name = 'SnowGear'
+        model.add(snowGear)
+        model.children.filter((obj) => SNOW_GEAR.includes(obj.name)).forEach((part) => snowGear.attach(part))
+        selectableObjects.push(snowGear)
       },
       undefined,
       (error) => console.error('Failed to load model:', error)
@@ -491,10 +557,23 @@ export default function App() {
         <OsWindow title="bookshelf" label="Bookshelf" onClose={() => setBooksOpen(false)}>
           <h1>Bookshelf</h1>
           <p className="subtitle">Books I'd recommend</p>
-          <ul className="books">
+          <ul className="plain-list">
             {BOOKS.map((book) => (
               <li key={book.title}>
                 <strong>{book.title}</strong> <span className="artist">{book.author}</span>
+              </li>
+            ))}
+          </ul>
+        </OsWindow>
+      )}
+      {sportsOpen && (
+        <OsWindow title="sports" label="Sports I like" onClose={() => setSportsOpen(false)}>
+          <h1>Sports</h1>
+          <p className="subtitle">What I do away from the desk</p>
+          <ul className="plain-list">
+            {SPORTS.map((sport) => (
+              <li key={sport.name}>
+                <strong>{sport.name}</strong> <span className="artist">{sport.note}</span>
               </li>
             ))}
           </ul>

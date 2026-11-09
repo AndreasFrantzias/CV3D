@@ -93,7 +93,8 @@
 .track-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist { color: #666; }
 
-.books {
+/* the bookshelf and sports lists */
+.plain-list {
   display: grid;
   gap: 10px;
   margin: 0;
