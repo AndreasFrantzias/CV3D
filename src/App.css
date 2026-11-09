@@ -93,5 +93,14 @@
 .track-text > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .artist { color: #666; }
 
+.books {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  list-style: none;
+}
+
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.95); } }

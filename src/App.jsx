@@ -17,13 +17,37 @@ const INFO = {
   ],
 }
 
+// shown in the window that opens when the books are clicked — fill these in
+const BOOKS = [
+  { title: 'Metamorphosis', author: 'Franz Kafka' },
+  { title: 'The Brothers Karamazov', author: 'Fyodor Dostoevsky' }
+]
+
 const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
+
+// the desktop-style window that the monitor, guitar and books open
+function OsWindow({ title, label, onClose, children }) {
+  return (
+    <div className="backdrop" onClick={onClose}>
+      <div className="os-window" role="dialog" aria-label={label} onClick={(e) => e.stopPropagation()}>
+        <div className="titlebar">
+          <button className="dot close" aria-label="Close" autoFocus onClick={onClose} />
+          <span className="dot min" />
+          <span className="dot max" />
+          <span className="title">{title}</span>
+        </div>
+        <div className="content">{children}</div>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const containerRef = useRef(null)
   const closeRef = useRef(null)
   const [windowOpen, setWindowOpen] = useState(false)
   const [songsOpen, setSongsOpen] = useState(false)
+  const [booksOpen, setBooksOpen] = useState(false)
   const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
 
   useEffect(() => {
@@ -76,7 +100,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -154,10 +178,12 @@ export default function App() {
       const blind = findNamed(hit.object, ['windowblind'])
       const chair = findNamed(hit.object, ['ChairPivot'])
       const guitar = findNamed(hit.object, ['GuitarPivot'])
+      const shelf = findNamed(hit.object, ['Books'])
       if (monitor) focusMonitor(monitor, hit)
       else if (blind) toggleBlind(blind)
       else if (chair) spinChair(chair)
       else if (guitar) strumGuitar(guitar)
+      else if (shelf) shakeBooks(shelf)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
     }
 
@@ -265,10 +291,26 @@ export default function App() {
       STRUM.forEach((note, i) => pluck(note, strumAt + i * 0.025, take))
       take.gain.setValueAtTime(1, strumAt + RING).linearRampToValueAtTime(0, now + TUNE_LENGTH)
     }
+
+    // rattle the books one after another along the shelf, then open the bookshelf window
+    function shakeBooks(shelf) {
+      if (shelf.children.some((book) => gsap.isTweening(book.position))) return // let a running shake finish
+      gsap.to(shelf.children.map((book) => book.position), {
+        y: '+=0.04',
+        duration: 0.10,
+        ease: 'sine.inOut',
+        // each book rattles up and down 3 times (yoyo with an odd repeat count ends where it started), 0.04s after the one before
+        // (repeat/yoyo go inside stagger; at the top level they'd replay the whole row as one slow wave)
+        stagger: { each: 0.04, repeat: 5, yoyo: true },
+        onComplete: () => setBooksOpen(true),
+      })
+    }
+
     function onKeyDown(event) {
       if (event.key !== 'Escape') return
       closeMonitor()
       setSongsOpen(false)
+      setBooksOpen(false)
     }
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -351,6 +393,13 @@ export default function App() {
         model.add(guitarPivot)
         guitarParts.forEach((obj) => guitarPivot.attach(obj))
         selectableObjects.push(guitarPivot)
+
+        // the books (book, book001, ... once loaded) group under one 'Books' node, so a click on any of them finds the whole shelf
+        const shelf = new THREE.Group()
+        shelf.name = 'Books'
+        model.add(shelf)
+        model.children.filter((obj) => obj.name.startsWith('book')).forEach((book) => shelf.attach(book))
+        selectableObjects.push(shelf)
       },
       undefined,
       (error) => console.error('Failed to load model:', error)
@@ -402,61 +451,54 @@ export default function App() {
       <div ref={containerRef} style={{ width: '100vw', height: '100vh' }}>
       </div>
       {windowOpen && (
-        <div className="backdrop" onClick={() => closeRef.current()}>
-          <div className="os-window" role="dialog" aria-label="About me" onClick={(e) => e.stopPropagation()}>
-            <div className="titlebar">
-              <button className="dot close" aria-label="Close" autoFocus onClick={() => closeRef.current()} />
-              <span className="dot min" />
-              <span className="dot max" />
-              <span className="title">about-me</span>
-            </div>
-            <div className="content">
-              <h1>{INFO.name}</h1>
-              <p className="subtitle">{INFO.title}</p>
-              <p>{INFO.bio}</p>
-              <ul className="links">
-                {INFO.links.map((link) => (
-                  <li key={link.label}>
-                    <a href={link.href} target="_blank" rel="noreferrer">{link.label}</a>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </div>
+        <OsWindow title="about-me" label="About me" onClose={() => closeRef.current()}>
+          <h1>{INFO.name}</h1>
+          <p className="subtitle">{INFO.title}</p>
+          <p>{INFO.bio}</p>
+          <ul className="links">
+            {INFO.links.map((link) => (
+              <li key={link.label}>
+                <a href={link.href} target="_blank" rel="noreferrer">{link.label}</a>
+              </li>
+            ))}
+          </ul>
+        </OsWindow>
       )}
       {songsOpen && (
-        <div className="backdrop" onClick={() => setSongsOpen(false)}>
-          <div className="os-window" role="dialog" aria-label="My most-played Spotify tracks" onClick={(e) => e.stopPropagation()}>
-            <div className="titlebar">
-              <button className="dot close" aria-label="Close" autoFocus onClick={() => setSongsOpen(false)} />
-              <span className="dot min" />
-              <span className="dot max" />
-              <span className="title">on-repeat</span>
-            </div>
-            <div className="content">
-              <h1>On repeat</h1>
-              <p className="subtitle">My most-played tracks on Spotify, last 6 months</p>
-              {tracks === null && <p>Loading…</p>}
-              {tracks === false && <p>Couldn't reach Spotify right now. Try again in a bit.</p>}
-              {tracks && (
-                <ol className="tracks">
-                  {tracks.map((track) => (
-                    <li key={track.id}>
-                      <a href={track.url} target="_blank" rel="noreferrer">
-                        <img src={track.image} alt="" width="40" height="40" />
-                        <span className="track-text">
-                          <strong>{track.name}</strong>
-                          <span className="artist">{track.artists}</span>
-                        </span>
-                      </a>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          </div>
-        </div>
+        <OsWindow title="on-repeat" label="My most-played Spotify tracks" onClose={() => setSongsOpen(false)}>
+          <h1>On repeat</h1>
+          <p className="subtitle">My most-played tracks on Spotify, last 6 months</p>
+          {tracks === null && <p>Loading…</p>}
+          {tracks === false && <p>Couldn't reach Spotify right now. Try again in a bit.</p>}
+          {tracks && (
+            <ol className="tracks">
+              {tracks.map((track) => (
+                <li key={track.id}>
+                  <a href={track.url} target="_blank" rel="noreferrer">
+                    <img src={track.image} alt="" width="40" height="40" />
+                    <span className="track-text">
+                      <strong>{track.name}</strong>
+                      <span className="artist">{track.artists}</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ol>
+          )}
+        </OsWindow>
+      )}
+      {booksOpen && (
+        <OsWindow title="bookshelf" label="Bookshelf" onClose={() => setBooksOpen(false)}>
+          <h1>Bookshelf</h1>
+          <p className="subtitle">Books I'd recommend</p>
+          <ul className="books">
+            {BOOKS.map((book) => (
+              <li key={book.title}>
+                <strong>{book.title}</strong> <span className="artist">{book.author}</span>
+              </li>
+            ))}
+          </ul>
+        </OsWindow>
       )}
     </>
   )
