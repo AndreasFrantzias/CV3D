@@ -29,6 +29,10 @@ const SPORTS = [
   { name: 'Basketball', note: 'I played basketball from middle school and i now play when i have the time' },
 ]
 
+// shown in the Hobbies window that opens when the 3D printer is clicked — put the photos in public/prints/ and list them here,
+// e.g. { src: '/prints/benchy.jpg', caption: 'Benchy' }
+const PRINTS = []
+
 const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
 
 // the desktop-style window that the monitor, guitar, books and snow gear open
@@ -55,6 +59,7 @@ export default function App() {
   const [songsOpen, setSongsOpen] = useState(false)
   const [booksOpen, setBooksOpen] = useState(false)
   const [sportsOpen, setSportsOpen] = useState(false)
+  const [printsOpen, setPrintsOpen] = useState(false)
   const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
 
   useEffect(() => {
@@ -107,7 +112,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear', 'Printer']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -194,6 +199,7 @@ export default function App() {
       else if (shelf) shakeBooks(shelf)
       else if (snowGear) shakeSnowGear(snowGear, hit.point)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
+      else if (findNamed(hit.object, ['Printer'])) togglePrinter()
     }
 
     function focusMonitor(monitor, hit) {
@@ -364,12 +370,51 @@ export default function App() {
       })
     }
 
+    // the 3D printer is a Prusa-style FDM: the X gantry (rail, end blocks, hotend) rides the Z rods, driven by two lead screws,
+    // so a Z move lowers the whole gantry while the screws turn, and the filament hanging from the extruder to the spool goes slack
+    const PRINTER_BED_DROP = 0.585 // nozzle tip (y 2.848) down to just above the bed (y 2.256) in CV20.glb
+    const SCREW_LEAD = 0.1 // gantry travel per screw turn; slower than a real 8 mm screw so the spin reads on screen
+    const printerZ = { drop: 0 }
+    let gantry, screws, slack, slackRestY, slackBottom, slackTop, printerMove
+    let printerDown = false
+
+    function setPrinterZ() {
+      const { drop } = printerZ
+      gantry.position.y = -drop
+      screws.forEach((screw) => (screw.rotation.y = (drop / SCREW_LEAD) * Math.PI * 2))
+      // squash the hanging filament toward the desk: fully at the extruder end so it stays plugged in, not at all at the spool
+      const squash = (slackTop - drop - slackBottom) / (slackTop - slackBottom)
+      const position = slack.geometry.attributes.position
+      for (let i = 0; i < position.count; i++) {
+        const t = i / (position.count - 1) // 0 at the extruder, 1 at the spool (the vertex order in CV20.glb)
+        position.setY(i, slackBottom + (slackRestY[i] - slackBottom) * THREE.MathUtils.lerp(squash, 1, t))
+      }
+      position.needsUpdate = true
+    }
+
+    function togglePrinter() {
+      printerDown = !printerDown
+      printerMove?.kill()
+      // once the head stops, open the Hobbies window with the photos of my prints
+      printerMove = gsap.timeline({ onUpdate: setPrinterZ, onComplete: () => setPrintsOpen(true) })
+      if (printerDown) {
+        // home Z like firmware does (G28): fast move down until the endstop trips, back off, then touch it again slowly
+        printerMove
+          .to(printerZ, { drop: PRINTER_BED_DROP, duration: 1.4, ease: 'sine.in' })
+          .to(printerZ, { drop: PRINTER_BED_DROP - 0.05, duration: 0.25, ease: 'power1.out' })
+          .to(printerZ, { drop: PRINTER_BED_DROP, duration: 0.6, ease: 'none' })
+      } else {
+        printerMove.to(printerZ, { drop: 0, duration: 1.4, ease: 'power1.inOut' })
+      }
+    }
+
     function onKeyDown(event) {
       if (event.key !== 'Escape') return
       closeMonitor()
       setSongsOpen(false)
       setBooksOpen(false)
       setSportsOpen(false)
+      setPrintsOpen(false)
     }
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -427,6 +472,7 @@ export default function App() {
           }
           if (obj.material?.name === 'bulb') {
             lampBulb = obj.material
+            lampBulb.emissive.set(0xffcc00) // glows yellow when the lamp is on (the glow is off until then)
             lampBulbIntensity = lampBulb.emissiveIntensity
             lampBulb.emissiveIntensity = 0
           }
@@ -466,6 +512,38 @@ export default function App() {
         model.add(snowGear)
         model.children.filter((obj) => SNOW_GEAR.includes(obj.name)).forEach((part) => snowGear.attach(part))
         selectableObjects.push(snowGear)
+
+        // the printer: a 'Printer' group to click, with a 'gantry' group inside it for the parts that ride the Z axis
+        // (the two gantry meshes load with odd 'servomotors...' names)
+        const printer = new THREE.Group()
+        printer.name = 'Printer'
+        model.add(printer)
+        gantry = new THREE.Group()
+        printer.add(gantry)
+        model.children.filter((obj) => obj.name.startsWith('servomotors') || ['printernozzle', 'fill_line'].includes(obj.name)).forEach((part) => gantry.attach(part))
+        model.children.filter((obj) => ['3dprinter', 'Cylinder001', 'spool', 'filament', 'fill_line2'].includes(obj.name)).forEach((part) => printer.attach(part))
+        selectableObjects.push(printer)
+
+        // both lead screws are one mesh ('Worm Gear.001'), so split its triangles left/right into one mesh per screw, each centred on its own axis
+        const screwPair = model.getObjectByName('Worm_Gear001')
+        const { index, attributes } = screwPair.geometry
+        const sides = [[], []]
+        for (let i = 0; i < index.count; i++) sides[attributes.position.getX(index.getX(i - (i % 3))) < 0.7 ? 0 : 1].push(index.getX(i))
+        screws = sides.map((triangles) => {
+          const axis = new THREE.Box3().setFromPoints(triangles.map((v) => new THREE.Vector3().fromBufferAttribute(attributes.position, v))).getCenter(new THREE.Vector3()).setY(0)
+          const screw = new THREE.Mesh(screwPair.geometry.clone().setIndex(triangles).translate(-axis.x, 0, -axis.z), screwPair.material)
+          screw.position.copy(axis)
+          screw.castShadow = screw.receiveShadow = true
+          printer.add(screw)
+          return screw
+        })
+        screwPair.removeFromParent()
+
+        slack = printer.getObjectByName('fill_line2')
+        const slackPosition = slack.geometry.attributes.position
+        slackRestY = Array.from({ length: slackPosition.count }, (_, i) => slackPosition.getY(i))
+        slackBottom = Math.min(...slackRestY)
+        slackTop = Math.max(...slackRestY)
       },
       undefined,
       (error) => console.error('Failed to load model:', error)
@@ -577,6 +655,24 @@ export default function App() {
               </li>
             ))}
           </ul>
+        </OsWindow>
+      )}
+      {printsOpen && (
+        <OsWindow title="Hobbies" label="Hobbies: my 3D prints" onClose={() => setPrintsOpen(false)}>
+          <h1>Hobbies</h1>
+          <p className="subtitle">Things I've 3D printed</p>
+          {PRINTS.length ? (
+            <ul className="prints">
+              {PRINTS.map((print) => (
+                <li key={print.src}>
+                  <img src={print.src} alt={print.caption} />
+                  <span className="artist">{print.caption}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>Photos coming soon.</p>
+          )}
         </OsWindow>
       )}
     </>
