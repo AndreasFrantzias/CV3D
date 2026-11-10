@@ -73,7 +73,8 @@ export default function App() {
     //camera.lookAt(0, 0, 0)
 
     const renderer = new THREE.WebGLRenderer()
-    renderer.setPixelRatio(window.devicePixelRatio)
+    renderer.antialias = true
+    //renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(window.innerWidth, window.innerHeight)
     renderer.toneMapping = THREE.AgXToneMapping // same view transform as Blender
     renderer.shadowMap.enabled = true
@@ -112,7 +113,7 @@ export default function App() {
       const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
       //checks if the new hovered object is different from the previous one
       if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear', 'Printer']) ? 'pointer' : ''
+        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear', 'Printer', 'LaptopBase']) ? 'pointer' : ''
         if(hoveredObject){
           //reset previous hovered object
           hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
@@ -175,6 +176,21 @@ export default function App() {
       gsap.to(lampBulb, { emissiveIntensity: lampOn ? lampBulbIntensity : 0, ...tween })
     }
 
+    // keyboard backlight: the keys sit in a shallow well in the black LaptopBase mesh, so a copy of just the well's floor
+    // (made when the model loads) is drawn over it in white, lighting the gaps between the keys but not the keys themselves;
+    // it isn't selectable, so hover and clicks still reach the laptop
+    const DECK_UP = new THREE.Vector3(0.5408, 0.8412, 0) // the laptop deck's normal in CV20.glb (it sits tilted on its stand)
+    // along DECK_UP the well floor is at 0.762-0.764, the key tops at 0.771-0.773 and the rest of the deck at 0.766-0.769
+    const isKeyWellFloor = (height) => height > 0.76 && height < 0.7645
+    // unlit and not tone mapped so it reads as glowing white (AgX would grey it, like the lamp bulb); polygonOffset wins over the floor underneath
+    const ledMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false, transparent: true, opacity: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+    let ledsOn = false
+
+    function toggleKeyboardLeds() {
+      ledsOn = !ledsOn
+      gsap.to(ledMaterial, { opacity: ledsOn ? 1 : 0, duration: 0.4, overwrite: true })
+    }
+
     function onPointerDown(event) {
       pointerDown.set(event.clientX, event.clientY)
     }
@@ -200,6 +216,7 @@ export default function App() {
       else if (snowGear) shakeSnowGear(snowGear, hit.point)
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
       else if (findNamed(hit.object, ['Printer'])) togglePrinter()
+      else if (findNamed(hit.object, ['LaptopBase'])) toggleKeyboardLeds()
     }
 
     function focusMonitor(monitor, hit) {
@@ -472,8 +489,10 @@ export default function App() {
           }
           if (obj.material?.name === 'bulb') {
             lampBulb = obj.material
-            lampBulb.emissive.set(0xffcc00) // glows yellow when the lamp is on (the glow is off until then)
-            lampBulbIntensity = lampBulb.emissiveIntensity
+            // the bulb glows yellow when the lamp is on; it skips tone mapping, or AgX washes the glow out to pale cream
+            lampBulb.emissive.set(0xffcc00)
+            lampBulb.toneMapped = false
+            lampBulbIntensity = 1 // the .glb's 2.5 clips to lemon-white once it isn't tone mapped
             lampBulb.emissiveIntensity = 0
           }
           if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "ChairPivot") {
@@ -486,6 +505,9 @@ export default function App() {
           // "parent:", obj.parent?.name
           // )
         })
+
+        // the purple bias light behind the monitor tinted the wall with a blue haze, so drop it
+        model.getObjectByName('MonitorBias')?.removeFromParent()
 
         // the guitar and its strings have their origins at the world origin, so give them a shared pivot at the guitar's foot
         // (glTF names lose their dots, so the strings load as guitarString, guitarString001, ...)
@@ -544,6 +566,17 @@ export default function App() {
         slackRestY = Array.from({ length: slackPosition.count }, (_, i) => slackPosition.getY(i))
         slackBottom = Math.min(...slackRestY)
         slackTop = Math.max(...slackRestY)
+
+        // the keyboard backlight: copy the well-floor triangles out of the laptop's body ([0] is the black body, [1] the trackpad)
+        const deck = model.getObjectByName('LaptopBase').children[0]
+        const deckPosition = deck.geometry.attributes.position
+        const onWellFloor = (v) => isKeyWellFloor(new THREE.Vector3().fromBufferAttribute(deckPosition, v).dot(DECK_UP))
+        const wellFloor = []
+        for (let i = 0; i < deck.geometry.index.count; i += 3) {
+          const triangle = [0, 1, 2].map((k) => deck.geometry.index.getX(i + k))
+          if (triangle.every(onWellFloor)) wellFloor.push(...triangle)
+        }
+        model.add(new THREE.Mesh(deck.geometry.clone().setIndex(wellFloor), ledMaterial))
       },
       undefined,
       (error) => console.error('Failed to load model:', error)
