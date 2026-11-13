@@ -90,6 +90,7 @@ export default function App() {
     const sky = SKY_DAY.clone()
 
     let model
+    let grassShader // set once the blade material compiles; its uTime drives the wind
     let disposed = false
 
     const raycaster = new THREE.Raycaster();
@@ -476,6 +477,31 @@ export default function App() {
         grass.receiveShadow = true
         scene.add(grass)
 
+        // swaying grass blades: one instanced mesh, a vertex-shader wobble for the wind
+        const BLADES = 60000
+        const bladeGeo = new THREE.ConeGeometry(0.05, 0.45, 3, 1).translate(0, 0.225, 0)
+        const bladeMat = new THREE.MeshLambertMaterial()
+        bladeMat.onBeforeCompile = (shader) => {
+          shader.uniforms.uTime = { value: 0 }
+          grassShader = shader
+          shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader.replace('#include <begin_vertex>', `
+            #include <begin_vertex>
+            vec3 root = instanceMatrix[3].xyz;
+            transformed.x += sin(uTime * 2.0 + root.x * 0.6 + root.z * 0.4) * 0.12 * position.y;`)
+        }
+        const blades = new THREE.InstancedMesh(bladeGeo, bladeMat, BLADES)
+        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3(), col = new THREE.Color()
+        for (let i = 0; i < BLADES; i++) {
+          do { const r = 4 + Math.sqrt(Math.random()) * 40, a = Math.random() * Math.PI * 2; pos.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r) } // a disc reaching into the fog, so there's no hard edge
+          while (Math.abs(pos.x) < 4.1 && Math.abs(pos.z) < 4.1) // keep the room's footprint clear
+          q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.random() * Math.PI)
+          scl.set(1, 0.6 + Math.random() * 0.9, 1)
+          blades.setMatrixAt(i, m.compose(pos, q, scl))
+          blades.setColorAt(i, col.setHSL(0.24 + Math.random() * 0.06, 0.55, 0.45 + Math.random() * 0.15))
+        }
+        blades.receiveShadow = true
+        scene.add(blades)
+
         model.traverse((obj) => {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
@@ -609,6 +635,7 @@ export default function App() {
       frameId = requestAnimationFrame(animate)
       controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
       updateHover();
+      if (grassShader) grassShader.uniforms.uTime.value = performance.now() / 1000
       renderer.render(scene, camera)
       // per-frame updates + render
     }
