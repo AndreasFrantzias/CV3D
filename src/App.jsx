@@ -444,6 +444,7 @@ export default function App() {
       (gltf) => {
         if (disposed) return
         model = gltf.scene
+        model.getObjectByName('world')?.removeFromParent() // Blender's grey backdrop box; the sky and grass below replace it
 
         const box = new THREE.Box3().setFromObject(model)
         const center = box.getCenter(new THREE.Vector3())
@@ -459,6 +460,17 @@ export default function App() {
         //   model.children[i].name = `child_${i}`
         // }
         scene.add(model)
+
+        // cartoony outdoors: flat sky colour, a grass field under the room, and fog that melts the grass into the sky
+        const SKY = 0x9fd8ff
+        scene.background = new THREE.Color(SKY)
+        scene.fog = new THREE.Fog(SKY, 25, 90)
+        const grass = new THREE.Mesh(new THREE.CircleGeometry(200, 64), new THREE.MeshLambertMaterial({ color: 0x7ccf4f }))
+        grass.rotation.x = -Math.PI / 2
+        grass.position.y = box.min.y - 0.01 // just under the room so the floors don't flicker
+        grass.receiveShadow = true
+        scene.add(grass)
+
         model.traverse((obj) => {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
