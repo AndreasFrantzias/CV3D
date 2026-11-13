@@ -85,6 +85,9 @@ export default function App() {
     const SKY_FILL_DARK = 0.15 // sky fill left when the blind is closed, so the room isn't pitch black
     const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x5a4636, SKY_FILL)
     scene.add(hemi)
+    const SKY_DAY = new THREE.Color(0x9fd8ff)
+    const SKY_NIGHT = new THREE.Color(0x1c2550) // closing the blind turns the outside to night
+    const sky = SKY_DAY.clone()
 
     let model
     let disposed = false
@@ -163,6 +166,8 @@ export default function App() {
       // a closed blind shuts out the sun and most of the sky light
       gsap.to(sun, { intensity: blindClosed ? 0 : sunIntensity, ...tween })
       gsap.to(hemi, { intensity: blindClosed ? SKY_FILL_DARK : SKY_FILL, ...tween })
+      const { r, g, b } = blindClosed ? SKY_NIGHT : SKY_DAY
+      gsap.to(sky, { r, g, b, ...tween })
     }
 
     // set when the model loads; the *Intensity values are the brightness given in Blender
@@ -462,9 +467,9 @@ export default function App() {
         scene.add(model)
 
         // cartoony outdoors: flat sky colour, a grass field under the room, and fog that melts the grass into the sky
-        const SKY = 0x9fd8ff
-        scene.background = new THREE.Color(SKY)
-        scene.fog = new THREE.Fog(SKY, 25, 90)
+        scene.background = sky
+        scene.fog = new THREE.Fog(sky, 25, 90)
+        scene.fog.color = sky // same Color object, so the blind's day/night tween recolours both
         const grass = new THREE.Mesh(new THREE.CircleGeometry(200, 64), new THREE.MeshLambertMaterial({ color: 0x7ccf4f }))
         grass.rotation.x = -Math.PI / 2
         grass.position.y = box.min.y - 0.01 // just under the room so the floors don't flicker
