@@ -3,6 +3,11 @@ import * as THREE from 'three'
 import gsap from 'gsap'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
+import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import './App.css'
 
 // shown in the window that opens when the monitor is clicked — fill these in
@@ -73,10 +78,11 @@ export default function App() {
     //camera.lookAt(0, 0, 0)
 
     const renderer = new THREE.WebGLRenderer()
-    renderer.antialias = true
-    //renderer.setPixelRatio(window.devicePixelRatio)
+    //renderer.antialias = true
+    renderer.setPixelRatio(window.devicePixelRatio)
     renderer.setSize(window.innerWidth, window.innerHeight)
-    renderer.toneMapping = THREE.AgXToneMapping // same view transform as Blender
+    renderer.toneMapping = THREE.NeutralToneMapping // keeps colors saturated; AgX (Blender's default) washed them out
+    renderer.toneMappingExposure = 1.4 // Neutral renders darker than AgX, so brighten to match
     renderer.shadowMap.enabled = true
     container.appendChild(renderer.domElement)
 
@@ -85,6 +91,14 @@ export default function App() {
     const SKY_FILL_DARK = 0.15 // sky fill left when the blind is closed, so the room isn't pitch black
     const hemi = new THREE.HemisphereLight(0xbcd4ff, 0x5a4636, SKY_FILL)
     scene.add(hemi)
+
+    // studio reflections: brighten the colours and give the glossy/metal parts something to reflect
+    // (the chair's chrome and the laptop are metal in the .glb, and metal with nothing to reflect renders black)
+    const ENV_FILL = 0.25
+    const ENV_FILL_DARK = 0.05 // with the blind closed
+    const pmrem = new THREE.PMREMGenerator(renderer)
+    scene.environment = pmrem.fromScene(new RoomEnvironment()).texture
+    scene.environmentIntensity = ENV_FILL
 
     let model
     let disposed = false
@@ -163,6 +177,7 @@ export default function App() {
       // a closed blind shuts out the sun and most of the sky light
       gsap.to(sun, { intensity: blindClosed ? 0 : sunIntensity, ...tween })
       gsap.to(hemi, { intensity: blindClosed ? SKY_FILL_DARK : SKY_FILL, ...tween })
+      gsap.to(scene, { environmentIntensity: blindClosed ? ENV_FILL_DARK : ENV_FILL, ...tween })
     }
 
     // set when the model loads; the *Intensity values are the brightness given in Blender
@@ -471,6 +486,7 @@ export default function App() {
             obj.shadow.mapSize.set(2048, 2048)
             obj.shadow.bias = -0.0005
             obj.shadow.normalBias = 0.02
+            obj.shadow.radius = 4 // soft edges, like Cycles' area-light shadows
           }
           if (obj.isDirectionalLight) {
             // fit the sun's shadow box around the room
@@ -546,6 +562,19 @@ export default function App() {
         model.children.filter((obj) => ['3dprinter', 'Cylinder001', 'spool', 'filament', 'fill_line2'].includes(obj.name)).forEach((part) => printer.attach(part))
         selectableObjects.push(printer)
 
+        // the printer frame and the chair are both near-black in the .glb and merged into one shape, so colour them apart:
+        // a matte grey printer frame, and a black chair with a silver spine
+        printer.traverse((obj) => {
+          if (obj.material?.name !== 'Material.001') return
+          obj.material.color.set(0x8c8c8c)
+          obj.material.roughness = 1
+        })
+        model.getObjectByName('ChairPivot').traverse((obj) => {
+          if (!obj.isMesh || obj.name === 'backrest') return
+          obj.material.color.set(0x1a1a1a)
+          obj.material.roughness = 0.3 // a bit of shine
+        })
+
         // both lead screws are one mesh ('Worm Gear.001'), so split its triangles left/right into one mesh per screw, each centred on its own axis
         const screwPair = model.getObjectByName('Worm_Gear001')
         const { index, attributes } = screwPair.geometry
@@ -586,13 +615,20 @@ export default function App() {
     controls.enableDamping = true
     controls.dampingFactor = 0.05
 
+    // ambient occlusion: the soft contact shadows in corners and under things that make Cycles renders look grounded
+    // (Cycles is an offline path tracer and can't run in the browser, so this is the real-time stand-in)
+    const composer = new EffectComposer(renderer)
+    composer.addPass(new RenderPass(scene, camera))
+    composer.addPass(new GTAOPass(scene, camera, window.innerWidth, window.innerHeight))
+    composer.addPass(new OutputPass())
+
     let frameId
 
     function animate() {
       frameId = requestAnimationFrame(animate)
       controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
       updateHover();
-      renderer.render(scene, camera)
+      composer.render()
       // per-frame updates + render
     }
 
@@ -603,6 +639,7 @@ export default function App() {
       camera.aspect = window.innerWidth / window.innerHeight
       camera.updateProjectionMatrix()
       renderer.setSize(window.innerWidth, window.innerHeight)
+      composer.setSize(window.innerWidth, window.innerHeight)
     }
 
     window.addEventListener('resize', handleResize)
@@ -618,6 +655,9 @@ export default function App() {
 
       if (model) scene.remove(model)
       container.removeChild(renderer.domElement)
+      composer.dispose()
+      scene.environment.dispose()
+      pmrem.dispose()
       renderer.dispose()
       audio?.close()
     }
