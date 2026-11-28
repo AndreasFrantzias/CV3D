@@ -8,8 +8,9 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import { drawDesktop, drawGitHubProfile } from './screens.js'
+import { groundSpot, lumpyBall, addClouds, addBirds, addRabbits } from './outdoors.js'
 import './App.css'
 
 // the small monitor's Projects window lists this account's public repos
@@ -112,6 +113,7 @@ export default function App() {
 
     let model
     let disposed = false
+    const tickers = [] // per-frame updates for the moving outdoor things, each called with the seconds since the last frame
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2(9, 9); // off-screen until the mouse moves, so nothing starts highlighted
@@ -583,28 +585,6 @@ export default function App() {
         const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
         const tilt = new THREE.Euler(), col = new THREE.Color()
 
-        // a random spot on the ground minR-maxR from the room's centre (spread evenly by area), with a keepOut-wide square around the room left clear
-        function groundSpot(minR, maxR, keepOut, out) {
-          do {
-            const r = Math.sqrt(randFloat(minR ** 2, maxR ** 2)), a = Math.random() * Math.PI * 2
-            out.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r)
-          } while (Math.abs(out.x) < keepOut && Math.abs(out.z) < keepOut)
-          return out
-        }
-
-        // a low-poly lump for the bushes and rocks: an icosahedron with its corners pushed in and out at random
-        // (shared corners are merged first, as normals and uvs would keep them apart, so the faces stay joined)
-        function lumpyBall(detail, min, max) {
-          const geometry = mergeVertices(new THREE.IcosahedronGeometry(1, detail).deleteAttribute('normal').deleteAttribute('uv'))
-          const corners = geometry.attributes.position
-          for (let i = 0; i < corners.count; i++) {
-            const lump = randFloat(min, max)
-            corners.setXYZ(i, corners.getX(i) * lump, corners.getY(i) * lump, corners.getZ(i) * lump)
-          }
-          geometry.computeVertexNormals()
-          return geometry
-        }
-
         // low-poly pines: three stacked four-sided pyramids, one unit tall, as one instanced mesh
         const TREES = 700
         const treeGeo = mergeGeometries([
@@ -615,7 +595,7 @@ export default function App() {
         const trees = new THREE.InstancedMesh(treeGeo, new THREE.MeshLambertMaterial({ color: 0x1f5a2c, flatShading: true }), TREES)
         for (let i = 0; i < TREES; i++) {
           // from just behind the orbiting camera (so none block the room) out to where the fog swallows them
-          groundSpot(11, 80, 0, pos)
+          groundSpot(11, 80, 0, pos).setY(grass.position.y)
           q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.random() * Math.PI)
           trees.setMatrixAt(i, m.compose(pos, q, scl.setScalar(randFloat(3, 7))))
         }
@@ -655,6 +635,9 @@ export default function App() {
           rocks.setColorAt(i, col.setHSL(randFloat(0.1, 0.14), 0.08, randFloat(0.45, 0.6), THREE.SRGBColorSpace)) // warm greys
         }
         scene.add(rocks)
+
+        // the moving parts of the outdoors (outdoors.js), updated every frame
+        tickers.push(addClouds(scene), addBirds(scene), addRabbits(scene, grass.position.y))
 
         model.traverse((obj) => {
           if (obj.isMesh) {
@@ -821,9 +804,13 @@ export default function App() {
     composer.addPass(new OutputPass())
 
     let frameId
+    let lastFrame = 0
 
-    function animate() {
+    function animate(now = 0) {
       frameId = requestAnimationFrame(animate)
+      const dt = Math.min((now - lastFrame) / 1000, 0.1) // capped, so nothing leaps after the tab was in the background
+      lastFrame = now
+      tickers.forEach((tick) => tick(dt))
       controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
       updateHover();
       composer.render()
