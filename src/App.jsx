@@ -8,6 +8,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
+import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 import './App.css'
 
 // shown in the window that opens when the monitor is clicked — fill these in
@@ -104,7 +105,6 @@ export default function App() {
     scene.environmentIntensity = ENV_FILL
 
     let model
-    let grassShader // set once the blade material compiles; its uTime drives the wind
     let disposed = false
 
     const raycaster = new THREE.Raycaster();
@@ -505,7 +505,7 @@ export default function App() {
         // }
         scene.add(model)
 
-        // cartoony outdoors: flat sky colour, a grass field under the room, and fog that melts the grass into the sky
+        // cartoony outdoors: flat sky colour, a flat green ground with pines and bushes on it, and fog that melts it all into the sky
         scene.background = sky
         scene.fog = new THREE.Fog(sky, 25, 90)
         scene.fog.color = sky // same Color object, so the blind's day/night tween recolours both
@@ -515,30 +515,48 @@ export default function App() {
         grass.receiveShadow = true
         scene.add(grass)
 
-        // swaying grass blades: one instanced mesh, a vertex-shader wobble for the wind
-        const BLADES = 60000
-        const bladeGeo = new THREE.ConeGeometry(0.05, 0.45, 3, 1).translate(0, 0.225, 0)
-        const bladeMat = new THREE.MeshLambertMaterial()
-        bladeMat.onBeforeCompile = (shader) => {
-          shader.uniforms.uTime = { value: 0 }
-          grassShader = shader
-          shader.vertexShader = 'uniform float uTime;\n' + shader.vertexShader.replace('#include <begin_vertex>', `
-            #include <begin_vertex>
-            vec3 root = instanceMatrix[3].xyz;
-            transformed.x += sin(uTime * 2.0 + root.x * 0.6 + root.z * 0.4) * 0.12 * position.y;`)
-        }
-        const blades = new THREE.InstancedMesh(bladeGeo, bladeMat, BLADES)
-        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3(), col = new THREE.Color()
-        for (let i = 0; i < BLADES; i++) {
-          do { const r = 4 + Math.sqrt(Math.random()) * 40, a = Math.random() * Math.PI * 2; pos.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r) } // a disc reaching into the fog, so there's no hard edge
-          while (Math.abs(pos.x) < 4.1 && Math.abs(pos.z) < 4.1) // keep the room's footprint clear
+        // low-poly pines: three stacked four-sided pyramids, one unit tall, as one instanced mesh
+        const TREES = 250
+        const treeGeo = mergeGeometries([
+          [0.31, 0.65, 0], // [radius, height, base y] of each tier, bottom to top
+          [0.24, 0.5, 0.31],
+          [0.19, 0.42, 0.58],
+        ].map(([radius, height, y]) => new THREE.ConeGeometry(radius, height, 4).translate(0, y + height / 2, 0)))
+        const trees = new THREE.InstancedMesh(treeGeo, new THREE.MeshLambertMaterial({ color: 0x1f5a2c, flatShading: true }), TREES)
+        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
+        for (let i = 0; i < TREES; i++) {
+          // spread evenly over a ring that starts behind the orbiting camera (so none block the room) and runs into the fog
+          const r = Math.sqrt(THREE.MathUtils.randFloat(11 ** 2, 45 ** 2)), a = Math.random() * Math.PI * 2
+          pos.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r)
           q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.random() * Math.PI)
-          scl.set(1, 0.6 + Math.random() * 0.9, 1)
-          blades.setMatrixAt(i, m.compose(pos, q, scl))
-          blades.setColorAt(i, col.setHSL(0.24 + Math.random() * 0.06, 0.6, 0.28 + Math.random() * 0.12))
+          trees.setMatrixAt(i, m.compose(pos, q, scl.setScalar(THREE.MathUtils.randFloat(3, 6))))
         }
-        blades.receiveShadow = true
-        scene.add(blades)
+        scene.add(trees)
+
+        // low-poly bushes: a lumpy ball (an icosahedron with its corners pushed in and out), scattered in clumps of three
+        const BUSHES = 360
+        // merge the shared corners first (normals and uvs would keep them apart), so moving a corner keeps its faces joined
+        const bushGeo = mergeVertices(new THREE.IcosahedronGeometry(1, 1).deleteAttribute('normal').deleteAttribute('uv'))
+        const corners = bushGeo.attributes.position
+        for (let i = 0; i < corners.count; i++) {
+          const lump = THREE.MathUtils.randFloat(0.8, 1.15)
+          corners.setXYZ(i, corners.getX(i) * lump, corners.getY(i) * lump * 0.8, corners.getZ(i) * lump) // * 0.8: a little squat
+        }
+        bushGeo.computeVertexNormals()
+        const bushes = new THREE.InstancedMesh(bushGeo, new THREE.MeshLambertMaterial({ flatShading: true }), BUSHES)
+        const clump = new THREE.Vector3(), tilt = new THREE.Euler(), col = new THREE.Color()
+        for (let i = 0; i < BUSHES; i++) {
+          if (i % 3 === 0) {
+            do { const r = Math.sqrt(THREE.MathUtils.randFloat(5 ** 2, 45 ** 2)), a = Math.random() * Math.PI * 2; clump.set(Math.cos(a) * r, 0, Math.sin(a) * r) }
+            while (Math.abs(clump.x) < 5.5 && Math.abs(clump.z) < 5.5) // keep clear of the room
+          }
+          const size = THREE.MathUtils.randFloat(0.35, 0.8)
+          pos.set(clump.x + THREE.MathUtils.randFloatSpread(2), grass.position.y + size * 0.5, clump.z + THREE.MathUtils.randFloatSpread(2)) // bottom sunk into the ground
+          q.setFromEuler(tilt.set(THREE.MathUtils.randFloatSpread(0.4), Math.random() * Math.PI * 2, THREE.MathUtils.randFloatSpread(0.4)))
+          bushes.setMatrixAt(i, m.compose(pos, q, scl.setScalar(size)))
+          bushes.setColorAt(i, col.setHSL(THREE.MathUtils.randFloat(0.3, 0.35), 0.6, THREE.MathUtils.randFloat(0.32, 0.4), THREE.SRGBColorSpace))
+        }
+        scene.add(bushes)
 
         model.traverse((obj) => {
           if (obj.isMesh) {
@@ -701,7 +719,6 @@ export default function App() {
       frameId = requestAnimationFrame(animate)
       controls.update() // only required if controls.enableDamping = true, or if controls.autoRotate = true
       updateHover();
-      if (grassShader) grassShader.uniforms.uTime.value = performance.now() / 1000
       composer.render()
       // per-frame updates + render
     }
