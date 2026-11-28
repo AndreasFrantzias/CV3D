@@ -9,15 +9,19 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { GTAOPass } from 'three/examples/jsm/postprocessing/GTAOPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
+import { drawDesktop, drawGitHubProfile } from './screens.js'
 import './App.css'
 
-// shown in the window that opens when the monitor is clicked — fill these in
+// the small monitor's Projects window lists this account's public repos
+const GITHUB_USER = 'AndreasFrantzias'
+
+// shown in the window that opens when the laptop screen is clicked — fill these in
 const INFO = {
   name: 'Andreas Frantzias',
   education: 'BSc in Computer Science, National and Kapodistrian University of Athens',
   bio: 'Aspiring software engineer with a passion for 3D graphics, web development, and quantum computing. Skilled in C++, React/Three.js and blender, I enjoy creating immersive applications that blend technology and creativity.',
   links: [
-    { label: 'GitHub', href: 'https://github.com/AndreasFrantzias' },
+    { label: 'GitHub', href: `https://github.com/${GITHUB_USER}` },
     { label: 'LinkedIn', href: 'https://www.linkedin.com/in/andreas-frantzias-bb81b2303/' },
     { label: 'Instagram', href: 'https://www.instagram.com/frantziasandreas/' },
   ],
@@ -68,6 +72,8 @@ export default function App() {
   const [sportsOpen, setSportsOpen] = useState(false)
   const [printsOpen, setPrintsOpen] = useState(false)
   const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
+  const [projectsOpen, setProjectsOpen] = useState(false)
+  const [repos, setRepos] = useState(null) // null = loading, false = couldn't load, else the repo list
 
   useEffect(() => {
     const container = containerRef.current
@@ -183,6 +189,39 @@ export default function App() {
       return obj
     }
 
+    // draw on a screen's glass: draw(ctx, width, height) paints a canvas sized to the glass, which then glows as the screen
+    function paintScreen(screen, draw) {
+      const glass = screen.children.find((mesh) => mesh.material?.name === 'screen')
+      // the .glb's UVs point into a sideways texture atlas, so lay new ones flat across the glass:
+      // u runs left to right and v bottom to top, as seen from in front of the screen
+      const { position, normal } = glass.geometry.attributes
+      const facing = new THREE.Vector3().fromBufferAttribute(normal, 0)
+      const right = new THREE.Vector3(0, 1, 0).cross(facing).normalize()
+      const up = facing.clone().cross(right)
+      const corner = new THREE.Vector3()
+      const us = [], vs = []
+      for (let i = 0; i < position.count; i++) {
+        corner.fromBufferAttribute(position, i)
+        us.push(corner.dot(right))
+        vs.push(corner.dot(up))
+      }
+      const [uMin, uMax, vMin, vMax] = [Math.min(...us), Math.max(...us), Math.min(...vs), Math.max(...vs)]
+      glass.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(us.flatMap((u, i) => [(u - uMin) / (uMax - uMin), (vs[i] - vMin) / (vMax - vMin)]), 2))
+
+      const canvas = document.createElement('canvas')
+      canvas.width = 1024
+      canvas.height = Math.round((1024 * (vMax - vMin)) / (uMax - uMin)) // the glass's own shape, so nothing is stretched
+      draw(canvas.getContext('2d'), canvas.width, canvas.height)
+      const texture = new THREE.CanvasTexture(canvas)
+      texture.colorSpace = THREE.SRGBColorSpace
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy() // stays sharp when seen at an angle
+      // all glow, no lit colour, like a real screen; the hover tint still adds on top of the white emissive
+      glass.material.color.set(0x000000)
+      glass.material.emissive.set(0xffffff)
+      glass.material.emissiveMap = texture
+      glass.material.emissiveIntensity = 1
+    }
+
     const BLIND_CLOSED_BOTTOM = 3.627 // top of the window sill in CV19.glb — lower edge of the closed blind
     let blindClosed = false
 
@@ -263,9 +302,16 @@ export default function App() {
       else if (findNamed(hit.object, ['LaptopBase'])) toggleKeyboardLeds()
     }
 
+    // zoom 4.5-18 units out; orbit only around the room's two open sides (+z to +x), from almost top-down to level with the target
+    // (level, not below: the target is 2 units up, so the camera never dips under the ground)
+    const ORBIT_LIMITS = { minDistance: 4.5, maxDistance: 18, minAzimuthAngle: 0, maxAzimuthAngle: Math.PI / 2, minPolarAngle: 0.1, maxPolarAngle: Math.PI / 2 }
+    // OrbitControls' defaults; controls.update() clamps to the limits even while disabled, so they're lifted for the monitor close-up
+    const NO_LIMITS = { minDistance: 0, maxDistance: Infinity, minAzimuthAngle: -Infinity, maxAzimuthAngle: Infinity, minPolarAngle: 0, maxPolarAngle: Math.PI }
+
     function focusMonitor(monitor, hit) {
       focused = true
       controls.enabled = false
+      Object.assign(controls, NO_LIMITS)
       savedView = { position: camera.position.clone(), target: controls.target.clone() }
 
       // park the camera in front of the clicked face, far enough back to fit the whole monitor
@@ -276,14 +322,16 @@ export default function App() {
       const position = center.clone().addScaledVector(normal, distance)
 
       gsap.to(camera.position, { ...xyz(position), duration: 1.2, ease: 'power2.inOut', overwrite: true })
-      gsap.to(controls.target, { ...xyz(center), duration: 1.2, ease: 'power2.inOut', overwrite: true, onComplete: () => setWindowOpen(true) })
+      gsap.to(controls.target, { ...xyz(center), duration: 1.2, ease: 'power2.inOut', overwrite: true, onComplete: () => (monitor.name === 'monitor' ? showProjects() : setWindowOpen(true)) })
     }
 
     function closeMonitor() {
       if (!focused) return
       setWindowOpen(false)
+      setProjectsOpen(false)
       gsap.to(camera.position, { ...xyz(savedView.position), duration: 1, ease: 'power2.inOut', overwrite: true })
       gsap.to(controls.target, { ...xyz(savedView.target), duration: 1, ease: 'power2.inOut', overwrite: true, onComplete: () => {
+        Object.assign(controls, ORBIT_LIMITS)
         controls.enabled = true
         focused = false
       } })
@@ -318,6 +366,22 @@ export default function App() {
         .catch(() => {
           tracksRequest = null // try again on the next click
           setTracks(false)
+        })
+    }
+
+    // the small monitor's window lists my public GitHub repos (newest work first), fetched on the first click
+    let reposRequest
+    function showProjects() {
+      setProjectsOpen(true)
+      if (reposRequest) return
+      setRepos(null)
+      reposRequest = fetch(`https://api.github.com/users/${GITHUB_USER}/repos?sort=pushed&per_page=100`)
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+        // skip forks and the profile-README repo (named after the account), which aren't projects
+        .then((list) => setRepos(list.filter((repo) => !repo.fork && repo.name !== GITHUB_USER)))
+        .catch(() => {
+          reposRequest = null // try again on the next click
+          setRepos(false)
         })
     }
 
@@ -561,6 +625,8 @@ export default function App() {
         model.traverse((obj) => {
           if (obj.isMesh) {
             obj.material = obj.material.clone()
+            // the posters are unlit in the .glb, so they glowed in the dark with the blind closed: make them lit matte paper
+            if (obj.material.isMeshBasicMaterial) obj.material = new THREE.MeshStandardMaterial({ map: obj.material.map, roughness: 1 })
             obj.castShadow = true
             obj.receiveShadow = true
           }
@@ -608,6 +674,11 @@ export default function App() {
 
         // the purple bias light behind the monitor tinted the wall with a blue haze, so drop it
         model.getObjectByName('MonitorBias')?.removeFromParent()
+
+        // what's on the screens (drawn in screens.js); the names in the .glb are swapped:
+        // 'LaptopScreen' is the upright screen above the keyboard, 'monitor' the small angled one beside it
+        paintScreen(model.getObjectByName('LaptopScreen'), drawDesktop)
+        paintScreen(model.getObjectByName('monitor'), (ctx, w, h) => drawGitHubProfile(ctx, w, h, GITHUB_USER, INFO.education))
 
         // the guitar and its strings have their origins at the world origin, so give them a shared pivot at the guitar's foot
         // (glTF names lose their dots, so the strings load as guitarString, guitarString001, ...)
@@ -706,6 +777,8 @@ export default function App() {
     controls.enableDamping = true
     controls.dampingFactor = 0.05
     controls.target.set(0.8, 2, -0.7)
+    Object.assign(controls, ORBIT_LIMITS)
+
     // ambient occlusion: the soft contact shadows in corners and under things that make Cycles renders look grounded
     // (Cycles is an offline path tracer and can't run in the browser, so this is the real-time stand-in)
     const composer = new EffectComposer(renderer)
@@ -771,6 +844,29 @@ export default function App() {
               </li>
             ))}
           </ul>
+        </OsWindow>
+      )}
+      {projectsOpen && (
+        <OsWindow title="projects" label="My GitHub projects" onClose={() => closeRef.current()}>
+          <h1>Projects</h1>
+          <p className="subtitle">My public repos on GitHub, most recently worked on first</p>
+          {repos === null && <p>Loading…</p>}
+          {repos === false && <p>Couldn't reach GitHub right now. Try again in a bit.</p>}
+          {repos?.length === 0 && <p>Nothing public yet.</p>}
+          {repos?.length > 0 && (
+            <ul className="tracks">
+              {repos.map((repo) => (
+                <li key={repo.id}>
+                  <a href={repo.html_url} target="_blank" rel="noreferrer">
+                    <span className="track-text">
+                      <strong>{repo.name}</strong>
+                      <span className="artist">{[repo.language, repo.description].filter(Boolean).join(' · ') || 'No description'}</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </OsWindow>
       )}
       {songsOpen && (
