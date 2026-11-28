@@ -47,10 +47,10 @@ const PRINTS = []
 const xyz = (v) => ({ x: v.x, y: v.y, z: v.z })
 
 // the desktop-style window that the monitor, guitar, books and snow gear open
-function OsWindow({ title, label, onClose, children }) {
+function OsWindow({ title, label, onClose, wide, children }) {
   return (
     <div className="backdrop" onClick={onClose}>
-      <div className="os-window" role="dialog" aria-label={label} onClick={(e) => e.stopPropagation()}>
+      <div className={wide ? 'os-window wide' : 'os-window'} role="dialog" aria-label={label} onClick={(e) => e.stopPropagation()}>
         <div className="titlebar">
           <button className="dot close" aria-label="Close" autoFocus onClick={onClose} />
           <span className="dot min" />
@@ -72,6 +72,7 @@ export default function App() {
   const [booksOpen, setBooksOpen] = useState(false)
   const [sportsOpen, setSportsOpen] = useState(false)
   const [printsOpen, setPrintsOpen] = useState(false)
+  const [cvOpen, setCvOpen] = useState(false)
   const [tracks, setTracks] = useState(null) // null = loading, false = couldn't load, else the track list
   const [projectsOpen, setProjectsOpen] = useState(false)
   const [repos, setRepos] = useState(null) // null = loading, false = couldn't load, else the repo list
@@ -144,6 +145,7 @@ export default function App() {
       Books: 'books',
       SnowGear: 'snow gear',
       Printer: '3D printer',
+      CV: 'CV',
     }
 
     // amount: 0 = no glow, 1 = full HOVER_TINT
@@ -302,6 +304,7 @@ export default function App() {
       else if (findNamed(hit.object, ['lampbase'])) toggleLamp()
       else if (findNamed(hit.object, ['Printer'])) togglePrinter()
       else if (findNamed(hit.object, ['LaptopBase'])) toggleKeyboardLeds()
+      else if (findNamed(hit.object, ['CV'])) setCvOpen(true)
     }
 
     // zoom 4.5-18 units out; orbit only around the room's two open sides (+z to +x), from almost top-down to level with the target
@@ -542,6 +545,7 @@ export default function App() {
       setBooksOpen(false)
       setSportsOpen(false)
       setPrintsOpen(false)
+      setCvOpen(false)
     }
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown)
@@ -691,11 +695,28 @@ export default function App() {
 
         // the purple bias light behind the monitor tinted the wall with a blue haze, so drop it
         model.getObjectByName('MonitorBias')?.removeFromParent()
+        // a stray leaf ('Plane' in the .glb) floats in mid-air beside the plant pot
+        model.getObjectByName('Plane')?.removeFromParent()
 
         // what's on the screens (drawn in screens.js); the names in the .glb are swapped:
         // 'LaptopScreen' is the upright screen above the keyboard, 'monitor' the small angled one beside it
         paintScreen(model.getObjectByName('LaptopScreen'), drawDesktop)
         paintScreen(model.getObjectByName('monitor'), (ctx, w, h) => drawGitHubProfile(ctx, w, h, GITHUB_USER, INFO.education))
+
+        // the CV (public/CV.jpg, page 1 of public/CV.pdf) as a sheet of A4 lying on the desk beside the mug; clicking it opens the PDF
+        const CV_LENGTH = 0.78 // about A4 next to the mug and laptop
+        const cvTexture = new THREE.TextureLoader().load('/CV.jpg')
+        cvTexture.colorSpace = THREE.SRGBColorSpace
+        cvTexture.anisotropy = renderer.capabilities.getMaxAnisotropy() // the page is seen at a shallow angle
+        // A4 is 1 : √2; laid flat, with the top of the page toward -z
+        const cv = new THREE.Mesh(new THREE.PlaneGeometry(CV_LENGTH / Math.SQRT2, CV_LENGTH).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ map: cvTexture, roughness: 1 }))
+        cv.name = 'CV'
+        cv.receiveShadow = true
+        // in the desk's inside corner, between the mug and the 3D printer, just above the desktop (y 1.96)
+        cv.position.set(-0.78, 1.965, -1.78)
+        cv.rotation.y = 1.13 // top of the page turned mostly toward the left wall, so it reads upright from the starting view
+        model.add(cv)
+        selectableObjects.push(cv)
 
         // the guitar and its strings have their origins at the world origin, so give them a shared pivot at the guitar's foot
         // (glTF names lose their dots, so the strings load as guitarString, guitarString001, ...)
@@ -936,6 +957,18 @@ export default function App() {
                 <strong>{sport.name}</strong> <span className="artist">{sport.note}</span>
               </li>
             ))}
+          </ul>
+        </OsWindow>
+      )}
+      {cvOpen && (
+        <OsWindow title="cv" label="My CV" wide onClose={() => setCvOpen(false)}>
+          <div className="cv-page">
+            <img src="/CV.jpg" alt={`CV of ${INFO.name}`} />
+          </div>
+          <ul className="links">
+            <li>
+              <a href="/CV.pdf" download>Download PDF</a>
+            </li>
           </ul>
         </OsWindow>
       )}

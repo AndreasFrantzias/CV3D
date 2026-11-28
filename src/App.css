@@ -148,3 +148,13 @@
 .interact-prompt strong { display: block; font-size: 15px; }
 .interact-prompt strong::first-letter { text-transform: uppercase; } /* names are lowercase so they read right mid-sentence */
 .interact-prompt span { color: rgb(255 255 255 / 0.75); font-size: 12px; }
+
+/* the CV window: wider than the others so the page is readable, scrolling down the page */
+.os-window.wide { width: min(860px, 100%); }
+.cv-page {
+  max-height: 70vh;
+  overflow-y: auto;
+  border: 1px solid #d0d0ce;
+  border-radius: 6px;
+}
+.cv-page img { display: block; width: 100%; }
