@@ -569,7 +569,7 @@ export default function App() {
         // }
         scene.add(model)
 
-        // cartoony outdoors: flat sky colour, a flat green ground with pines and bushes on it, and fog that melts it all into the sky
+        // cartoony outdoors: flat sky colour, a flat green ground with pines, bushes and rocks on it, and fog that melts it all into the sky
         scene.background = sky
         scene.fog = new THREE.Fog(sky, 25, 90)
         scene.fog.color = sky // same Color object, so the blind's day/night tween recolours both
@@ -579,48 +579,82 @@ export default function App() {
         grass.receiveShadow = true
         scene.add(grass)
 
+        const { randFloat, randFloatSpread } = THREE.MathUtils
+        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
+        const tilt = new THREE.Euler(), col = new THREE.Color()
+
+        // a random spot on the ground minR-maxR from the room's centre (spread evenly by area), with a keepOut-wide square around the room left clear
+        function groundSpot(minR, maxR, keepOut, out) {
+          do {
+            const r = Math.sqrt(randFloat(minR ** 2, maxR ** 2)), a = Math.random() * Math.PI * 2
+            out.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r)
+          } while (Math.abs(out.x) < keepOut && Math.abs(out.z) < keepOut)
+          return out
+        }
+
+        // a low-poly lump for the bushes and rocks: an icosahedron with its corners pushed in and out at random
+        // (shared corners are merged first, as normals and uvs would keep them apart, so the faces stay joined)
+        function lumpyBall(detail, min, max) {
+          const geometry = mergeVertices(new THREE.IcosahedronGeometry(1, detail).deleteAttribute('normal').deleteAttribute('uv'))
+          const corners = geometry.attributes.position
+          for (let i = 0; i < corners.count; i++) {
+            const lump = randFloat(min, max)
+            corners.setXYZ(i, corners.getX(i) * lump, corners.getY(i) * lump, corners.getZ(i) * lump)
+          }
+          geometry.computeVertexNormals()
+          return geometry
+        }
+
         // low-poly pines: three stacked four-sided pyramids, one unit tall, as one instanced mesh
-        const TREES = 250
+        const TREES = 700
         const treeGeo = mergeGeometries([
           [0.31, 0.65, 0], // [radius, height, base y] of each tier, bottom to top
           [0.24, 0.5, 0.31],
           [0.19, 0.42, 0.58],
         ].map(([radius, height, y]) => new THREE.ConeGeometry(radius, height, 4).translate(0, y + height / 2, 0)))
         const trees = new THREE.InstancedMesh(treeGeo, new THREE.MeshLambertMaterial({ color: 0x1f5a2c, flatShading: true }), TREES)
-        const m = new THREE.Matrix4(), q = new THREE.Quaternion(), pos = new THREE.Vector3(), scl = new THREE.Vector3()
         for (let i = 0; i < TREES; i++) {
-          // spread evenly over a ring that starts behind the orbiting camera (so none block the room) and runs into the fog
-          const r = Math.sqrt(THREE.MathUtils.randFloat(11 ** 2, 45 ** 2)), a = Math.random() * Math.PI * 2
-          pos.set(Math.cos(a) * r, grass.position.y, Math.sin(a) * r)
+          // from just behind the orbiting camera (so none block the room) out to where the fog swallows them
+          groundSpot(11, 80, 0, pos)
           q.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.random() * Math.PI)
-          trees.setMatrixAt(i, m.compose(pos, q, scl.setScalar(THREE.MathUtils.randFloat(3, 6))))
+          trees.setMatrixAt(i, m.compose(pos, q, scl.setScalar(randFloat(3, 7))))
         }
         scene.add(trees)
 
-        // low-poly bushes: a lumpy ball (an icosahedron with its corners pushed in and out), scattered in clumps of three
-        const BUSHES = 360
-        // merge the shared corners first (normals and uvs would keep them apart), so moving a corner keeps its faces joined
-        const bushGeo = mergeVertices(new THREE.IcosahedronGeometry(1, 1).deleteAttribute('normal').deleteAttribute('uv'))
-        const corners = bushGeo.attributes.position
-        for (let i = 0; i < corners.count; i++) {
-          const lump = THREE.MathUtils.randFloat(0.8, 1.15)
-          corners.setXYZ(i, corners.getX(i) * lump, corners.getY(i) * lump * 0.8, corners.getZ(i) * lump) // * 0.8: a little squat
-        }
-        bushGeo.computeVertexNormals()
-        const bushes = new THREE.InstancedMesh(bushGeo, new THREE.MeshLambertMaterial({ flatShading: true }), BUSHES)
-        const clump = new THREE.Vector3(), tilt = new THREE.Euler(), col = new THREE.Color()
+        // low-poly bushes, scattered in clumps of three
+        const BUSHES = 600
+        const bushes = new THREE.InstancedMesh(lumpyBall(1, 0.8, 1.15), new THREE.MeshLambertMaterial({ flatShading: true }), BUSHES)
+        const clump = new THREE.Vector3()
         for (let i = 0; i < BUSHES; i++) {
-          if (i % 3 === 0) {
-            do { const r = Math.sqrt(THREE.MathUtils.randFloat(5 ** 2, 45 ** 2)), a = Math.random() * Math.PI * 2; clump.set(Math.cos(a) * r, 0, Math.sin(a) * r) }
-            while (Math.abs(clump.x) < 5.5 && Math.abs(clump.z) < 5.5) // keep clear of the room
-          }
-          const size = THREE.MathUtils.randFloat(0.35, 0.8)
-          pos.set(clump.x + THREE.MathUtils.randFloatSpread(2), grass.position.y + size * 0.5, clump.z + THREE.MathUtils.randFloatSpread(2)) // bottom sunk into the ground
-          q.setFromEuler(tilt.set(THREE.MathUtils.randFloatSpread(0.4), Math.random() * Math.PI * 2, THREE.MathUtils.randFloatSpread(0.4)))
-          bushes.setMatrixAt(i, m.compose(pos, q, scl.setScalar(size)))
-          bushes.setColorAt(i, col.setHSL(THREE.MathUtils.randFloat(0.3, 0.35), 0.6, THREE.MathUtils.randFloat(0.32, 0.4), THREE.SRGBColorSpace))
+          if (i % 3 === 0) groundSpot(5, 60, 5.5, clump)
+          const size = randFloat(0.35, 0.8)
+          pos.set(clump.x + randFloatSpread(2), grass.position.y + size * 0.4, clump.z + randFloatSpread(2)) // bottom sunk into the ground
+          q.setFromEuler(tilt.set(randFloatSpread(0.4), Math.random() * Math.PI * 2, randFloatSpread(0.4)))
+          bushes.setMatrixAt(i, m.compose(pos, q, scl.set(size, size * 0.8, size))) // * 0.8: a little squat
+          bushes.setColorAt(i, col.setHSL(randFloat(0.3, 0.35), 0.6, randFloat(0.32, 0.4), THREE.SRGBColorSpace))
         }
         scene.add(bushes)
+
+        // low-poly rocks: chunkier lumps with fewer faces, in pairs of a rock and a smaller one beside it;
+        // mostly pebbles, with the odd boulder kept well away from the room
+        const ROCKS = 500
+        const rocks = new THREE.InstancedMesh(lumpyBall(0, 0.7, 1.25), new THREE.MeshLambertMaterial({ flatShading: true }), ROCKS)
+        const rockSpot = new THREE.Vector3()
+        let rockSize
+        for (let i = 0; i < ROCKS; i++) {
+          const first = i % 2 === 0
+          if (first) {
+            groundSpot(4.5, 50, 4.6, rockSpot)
+            rockSize = Math.hypot(rockSpot.x, rockSpot.z) > 8 && Math.random() < 0.2 ? randFloat(0.5, 1.1) : randFloat(0.12, 0.4)
+          }
+          const size = first ? rockSize : rockSize * randFloat(0.4, 0.7)
+          const gap = first ? 0 : rockSize * 1.1, a = Math.random() * Math.PI * 2
+          pos.set(rockSpot.x + Math.cos(a) * gap, grass.position.y + size * 0.3, rockSpot.z + Math.sin(a) * gap) // half sunk, so it sits rather than balances
+          q.setFromEuler(tilt.set(randFloatSpread(1), Math.random() * Math.PI * 2, randFloatSpread(1)))
+          rocks.setMatrixAt(i, m.compose(pos, q, scl.set(size * randFloat(0.9, 1.3), size * randFloat(0.6, 0.9), size * randFloat(0.9, 1.3))))
+          rocks.setColorAt(i, col.setHSL(randFloat(0.1, 0.14), 0.08, randFloat(0.45, 0.6), THREE.SRGBColorSpace)) // warm greys
+        }
+        scene.add(rocks)
 
         model.traverse((obj) => {
           if (obj.isMesh) {
