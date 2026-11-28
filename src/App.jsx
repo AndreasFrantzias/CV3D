@@ -60,6 +60,7 @@ function OsWindow({ title, label, onClose, children }) {
 export default function App() {
   const containerRef = useRef(null)
   const closeRef = useRef(null)
+  const promptRef = useRef(null)
   const [windowOpen, setWindowOpen] = useState(false)
   const [songsOpen, setSongsOpen] = useState(false)
   const [booksOpen, setBooksOpen] = useState(false)
@@ -74,8 +75,7 @@ export default function App() {
     const scene = new THREE.Scene()
 
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000)
-    camera.position.set(3, 6, 6)
-    //camera.lookAt(0, 0, 0)
+    camera.position.set(6.9, 7.7, 5.2) // the opening view: looking into the room's open corner (target set on the controls below)
 
     const renderer = new THREE.WebGLRenderer()
     //renderer.antialias = true
@@ -108,8 +108,7 @@ export default function App() {
     let disposed = false
 
     const raycaster = new THREE.Raycaster();
-    const mouse = new THREE.Vector2();
-    let hoveredObject = null;
+    const mouse = new THREE.Vector2(9, 9); // off-screen until the mouse moves, so nothing starts highlighted
 
     const selectableObjects = [];
 
@@ -118,33 +117,57 @@ export default function App() {
       const rect = renderer.domElement.getBoundingClientRect();
       // Calculate mouse position in normalized device coordinates (-1 to +1) for both components
       mouse.x = ((event.clientX -rect.left)/rect.width) * 2 - 1;
-      mouse.y = -((event.clientY - rect.top)/ rect.height) * 2 + 1;
-    }
+      mouse.y = -((event.clientY - rect.top)/ rect.height) * 2 + 1;    }
     window.addEventListener('mousemove',onMouseMove);
 
-    function updateHover(){
-      //point raycaster from camera through mouse's position
-      raycaster.setFromCamera(mouse,camera);
-      //check which object in selectableObjects the ray passed through(true also check the children)
-      const intersects = raycaster.intersectObjects(selectableObjects, true);
-      console.log('selectable hits:', intersects.map(i => i.object.name || i.object.parent?.name))
-      const newHover = !focused && intersects.length > 0 ? intersects[0].object : null;
-      //checks if the new hovered object is different from the previous one
-      if(newHover !== hoveredObject){
-        renderer.domElement.style.cursor = findNamed(newHover, [...zoomableScreens, 'windowblind', 'lampbase', 'ChairPivot', 'GuitarPivot', 'Books', 'SnowGear', 'Printer', 'LaptopBase']) ? 'pointer' : ''
-        if(hoveredObject){
-          //reset previous hovered object
-          hoveredObject.material.emissive.setHex(hoveredObject.currentHex);
-        }
-        if(newHover){
-          //store current color and set new color
-          newHover.currentHex = newHover.material.emissive.getHex();
-          newHover.material.emissive.setHex(0xffee00);
-          // newHover.setScale(100, 100, 100); // Scale up the hovered object
-        }
-        //update to the new hovered object
-        hoveredObject = newHover;
-      }
+    // hovering an item tints every mesh in it with a soft glow, added on top of its own emissive so lit screens stay lit
+    const HOVER_TINT = new THREE.Color(0x666666)
+    let hoveredItem = null
+
+    // what the hover label calls each clickable item, keyed by its node name
+    const ITEM_NAMES = {
+      monitor: 'monitor',
+      LaptopScreen: 'laptop',
+      LaptopBase: 'laptop keyboard',
+      windowblind: 'window blind',
+      lampbase: 'desk lamp',
+      Chair: 'chair',
+      GuitarPivot: 'guitar',
+      Books: 'books',
+      SnowGear: 'snow gear',
+      Printer: '3D printer',
+    }
+
+    // amount: 0 = no glow, 1 = full HOVER_TINT
+    function paintTint(item, amount) {
+      item.traverse((obj) => {
+        const material = obj.material
+        if (!material?.emissive || material === lampBulb) return // the bulb's emissive is the lamp's on/off glow
+        material.userData.emissive ??= material.emissive.clone() // materials can be shared (the printer screws), so save the original once
+        material.emissive.copy(HOVER_TINT).multiplyScalar(amount).add(material.userData.emissive)
+      })
+    }
+
+    // fade the glow in or out; overwrite lets a quick re-hover reverse a fade from wherever it is
+    function tintItem(item, on) {
+      if (!item) return
+      const hover = (item.userData.hover ??= { amount: 0 })
+      gsap.to(hover, { amount: on ? 1 : 0, duration: 0.3, ease: 'power1.out', overwrite: true, onUpdate: () => paintTint(item, hover.amount) })
+    }
+
+    function updateHover() {
+      raycaster.setFromCamera(mouse, camera)
+      const hit = focused ? null : raycaster.intersectObjects(selectableObjects, true)[0]
+      // highlight the whole clickable item (the chair, the shelf of books...), not just the one mesh under the mouse
+      const item = hit ? findNamed(hit.object, Object.keys(ITEM_NAMES)) : null
+      if (item === hoveredItem) return
+      renderer.domElement.style.cursor = item ? 'pointer' : ''
+      promptRef.current.classList.toggle('show', !!item)
+      // only rewritten on hover, so the label keeps its text while it fades out
+      if (item) promptRef.current.firstChild.textContent = ITEM_NAMES[item.name]
+      tintItem(hoveredItem, false)
+      tintItem(item, true)
+      hoveredItem = item
     }
 
     let focused = false
@@ -225,7 +248,7 @@ export default function App() {
       if (!hit) return
       const monitor = findNamed(hit.object, zoomableScreens)
       const blind = findNamed(hit.object, ['windowblind'])
-      const chair = findNamed(hit.object, ['ChairPivot'])
+      const chair = findNamed(hit.object, ['Chair'])?.getObjectByName('ChairPivot')
       const guitar = findNamed(hit.object, ['GuitarPivot'])
       const shelf = findNamed(hit.object, ['Books'])
       const snowGear = findNamed(hit.object, ['SnowGear'])
@@ -360,7 +383,7 @@ export default function App() {
     }
 
     // the snowboard leaning on the left wall, plus the helmet, goggles and straps on the floor beside it
-    const SNOW_GEAR = ['snowboard', 'helmet', 'goggle', 'helmetstrap1', 'helmetstrap2']
+    const SNOW_GEAR = ['snowboard', 'helmet', 'goggle', 'goglestrap', 'helmetstrap1', 'helmetstrap2']
     const FLOOR_Y = 0.31 // top of the floor tiles, where the snow lands
 
     // shake the gear along the wall (not into it), throw snow from where it was clicked, then open the sports window
@@ -554,7 +577,7 @@ export default function App() {
             lampBulbIntensity = 1 // the .glb's 2.5 clips to lemon-white once it isn't tone mapped
             lampBulb.emissiveIntensity = 0
           }
-          if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase" || obj.name === "ChairPivot") {
+          if (obj.name === "monitor" || obj.name === "LaptopScreen" || obj.name === "LaptopBase" || obj.name === "windowblind" || obj.name === "lampbase") {
             selectableObjects.push(obj)
           }
           // console.log(
@@ -593,6 +616,13 @@ export default function App() {
         model.add(snowGear)
         model.children.filter((obj) => SNOW_GEAR.includes(obj.name)).forEach((part) => snowGear.attach(part))
         selectableObjects.push(snowGear)
+
+        // the chair: the spinning ChairPivot plus the base that stays put (gas lift, legs, wheels), grouped as 'Chair' so they hover and click as one
+        const chair = new THREE.Group()
+        chair.name = 'Chair'
+        model.add(chair)
+        model.children.filter((obj) => /^(ChairPivot|chair_holder|leg\d?|wheel\d)$/.test(obj.name)).forEach((part) => chair.attach(part))
+        selectableObjects.push(chair)
 
         // the printer: a 'Printer' group to click, with a 'gantry' group inside it for the parts that ride the Z axis
         // (the two gantry meshes load with odd 'servomotors...' names)
@@ -657,7 +687,7 @@ export default function App() {
     const controls = new OrbitControls(camera, renderer.domElement)
     controls.enableDamping = true
     controls.dampingFactor = 0.05
-
+    controls.target.set(0.8, 2, -0.7)
     // ambient occlusion: the soft contact shadows in corners and under things that make Cycles renders look grounded
     // (Cycles is an offline path tracer and can't run in the browser, so this is the real-time stand-in)
     const composer = new EffectComposer(renderer)
@@ -711,6 +741,7 @@ export default function App() {
     <>
       <div ref={containerRef} style={{ width: '100vw', height: '100vh' }}>
       </div>
+      <div ref={promptRef} className="interact-prompt"><strong /><span>Click to interact</span></div>
       {windowOpen && (
         <OsWindow title="about-me" label="About me" onClose={() => closeRef.current()}>
           <h1>{INFO.name}</h1>

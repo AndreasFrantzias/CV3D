@@ -126,3 +126,25 @@
 
 @keyframes fade-in { from { opacity: 0; } }
 @keyframes pop-in { from { opacity: 0; transform: scale(0.95); } }
+
+/* the item-name label shown at the bottom centre while hovering a clickable item (filled in from App.jsx) */
+.interact-prompt {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  translate: -50% 0;
+  text-align: center;
+  padding: 5px 10px 6px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.4);
+  color: #fff;
+  font: 13px system-ui, sans-serif;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.interact-prompt.show { opacity: 1; }
+.interact-prompt strong { display: block; font-size: 15px; }
+.interact-prompt strong::first-letter { text-transform: uppercase; } /* names are lowercase so they read right mid-sentence */
+.interact-prompt span { color: rgb(255 255 255 / 0.75); font-size: 12px; }
